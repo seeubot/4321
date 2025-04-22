@@ -14,6 +14,8 @@ import urllib.parse
 from urllib.parse import urlparse
 from flask import Flask, render_template
 from threading import Thread
+import requests
+import json
 
 load_dotenv('config.env', override=True)
 logging.basicConfig(
@@ -120,6 +122,43 @@ def format_size(size):
     else:
         return f"{size / (1024 * 1024 * 1024):.2f} GB"
 
+# Function to get direct download link from API
+async def get_direct_link(terabox_url):
+    encoded_url = urllib.parse.quote(terabox_url)
+    api_url = f"https://teraboxapi-phi.vercel.app/api?url={encoded_url}"
+    
+    try:
+        response = requests.get(api_url)
+        response.raise_for_status()  # Raise exception for 4XX/5XX responses
+        
+        data = response.json()
+        
+        if data.get("status") != "success":
+            return None, "API returned error status"
+        
+        extracted_info = data.get("Extracted Info", [])
+        if not extracted_info:
+            return None, "No extracted info found in API response"
+        
+        if not isinstance(extracted_info, list) or len(extracted_info) == 0:
+            return None, "Invalid format of extracted info"
+        
+        direct_link = extracted_info[0].get("Direct Download Link")
+        if not direct_link:
+            return None, "No direct download link found in API response"
+        
+        file_name = extracted_info[0].get("Title", "terabox_file")
+        file_size = extracted_info[0].get("Size", "Unknown")
+        
+        return direct_link, {"title": file_name, "size": file_size}
+    
+    except requests.exceptions.RequestException as e:
+        return None, f"Error fetching API: {str(e)}"
+    except json.JSONDecodeError as e:
+        return None, f"Error parsing API response: {str(e)}"
+    except Exception as e:
+        return None, f"Unexpected error: {str(e)}"
+
 @app.on_message(filters.command("start"))
 async def start_command(client: Client, message: Message):
     join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/terao2")
@@ -171,12 +210,20 @@ async def handle_message(client: Client, message: Message):
         await message.reply_text("Please provide a valid Terabox link.")
         return
 
-    encoded_url = urllib.parse.quote(url)
-    final_url = f"https://teraboxapi-phi.vercel.app/api?url={encoded_url}"
-
-    download = aria2.add_uris([final_url])
-    status_message = await message.reply_text("sᴇɴᴅɪɴɢ ʏᴏᴜ ᴛʜᴇ ᴍᴇᴅɪᴀ...🤤")
-
+    status_message = await message.reply_text("𝑷𝒓𝒐𝒄𝒆𝒔𝒔𝒊𝒏𝒈 𝒍𝒊𝒏𝒌 𝒂𝒏𝒅 𝒆𝒙𝒕𝒓𝒂𝒄𝒕𝒊𝒏𝒈 𝒅𝒊𝒓𝒆𝒄𝒕 𝒅𝒐𝒘𝒏𝒍𝒐𝒂𝒅 𝑼𝑹𝑳...")
+    
+    # Get direct download link from API
+    direct_link, info = await get_direct_link(url)
+    
+    if not direct_link:
+        await status_message.edit_text(f"Failed to extract direct download link: {info}")
+        return
+    
+    await status_message.edit_text("sᴇɴᴅɪɴɢ ʏᴏᴜ ᴛʜᴇ ᴍᴇᴅɪᴀ...🤤")
+    
+    # Add the direct link to aria2 for download
+    download = aria2.add_uris([direct_link])
+    
     start_time = datetime.now()
 
     while not download.is_complete:
