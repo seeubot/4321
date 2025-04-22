@@ -122,6 +122,29 @@ def format_size(size):
     else:
         return f"{size / (1024 * 1024 * 1024):.2f} GB"
 
+def format_speed(speed):
+    if speed == 0:
+        return "0 B/s"
+    
+    # Convert to appropriate unit with better precision
+    if speed < 1024:
+        return f"{speed:.2f} B/s"
+    elif speed < 1024 * 1024:
+        return f"{speed / 1024:.2f} KB/s"
+    elif speed < 1024 * 1024 * 1024:
+        return f"{speed / (1024 * 1024):.2f} MB/s"
+    else:
+        return f"{speed / (1024 * 1024 * 1024):.2f} GB/s"
+
+def create_progress_bar(percentage):
+    """Create a digital progress bar [0-100%]"""
+    filled_length = int(percentage / 5)  # 20 segments for the bar
+    empty_length = 20 - filled_length
+    
+    # Using block characters for a more digital look
+    bar = '█' * filled_length + '░' * empty_length
+    return f"[{bar}] {percentage:.1f}%"
+
 # Function to get direct download link from API
 async def get_direct_link(terabox_url):
     encoded_url = urllib.parse.quote(terabox_url)
@@ -236,12 +259,12 @@ async def handle_message(client: Client, message: Message):
 
         status_text = (
             f"┏ ғɪʟᴇɴᴀᴍᴇ: {download.name}\n"
-            f"┠ [{'★' * int(progress / 10)}{'☆' * (10 - int(progress / 10))}] {progress:.2f}%\n"
+            f"┠ {create_progress_bar(progress)}\n"
             f"┠ ᴘʀᴏᴄᴇssᴇᴅ: {format_size(download.completed_length)} ᴏғ {format_size(download.total_length)}\n"
             f"┠ sᴛᴀᴛᴜs: 📥 Downloading\n"
             f"┠ ᴇɴɢɪɴᴇ: <b><u>Aria2c v1.37.0</u></b>\n"
-            f"┠ sᴘᴇᴇᴅ: {format_size(download.download_speed)}/s\n"
-            f"┠ ᴇᴛᴀ: {download.eta} | ᴇʟᴀᴘsᴇᴅ: {elapsed_minutes}m {elapsed_seconds}s\n"
+            f"┠ sᴘᴇᴇᴅ: {format_speed(download.download_speed)}\n"
+            f"┠ ᴇʟᴀᴘsᴇᴅ: {elapsed_minutes}m {elapsed_seconds}s\n"
             f"┖ ᴜsᴇʀ: <a href='tg://user?id={user_id}'>{message.from_user.first_name}</a> | ɪᴅ: {user_id}\n"
             )
         while True:
@@ -281,14 +304,17 @@ async def handle_message(client: Client, message: Message):
         progress = (current / total) * 100
         elapsed_time = datetime.now() - start_time
         elapsed_minutes, elapsed_seconds = divmod(elapsed_time.seconds, 60)
+        
+        # Calculate upload speed
+        upload_speed = current / elapsed_time.seconds if elapsed_time.seconds > 0 else 0
 
         status_text = (
             f"┏ ғɪʟᴇɴᴀᴍᴇ: {download.name}\n"
-            f"┠ [{'★' * int(progress / 10)}{'☆' * (10 - int(progress / 10))}] {progress:.2f}%\n"
+            f"┠ {create_progress_bar(progress)}\n"
             f"┠ ᴘʀᴏᴄᴇssᴇᴅ: {format_size(current)} ᴏғ {format_size(total)}\n"
             f"┠ sᴛᴀᴛᴜs: 📤 Uploading to Telegram\n"
             f"┠ ᴇɴɢɪɴᴇ: <b><u>PyroFork v2.2.11</u></b>\n"
-            f"┠ sᴘᴇᴇᴅ: {format_size(current / elapsed_time.seconds if elapsed_time.seconds > 0 else 0)}/s\n"
+            f"┠ sᴘᴇᴇᴅ: {format_speed(upload_speed)}\n"
             f"┠ ᴇʟᴀᴘsᴇᴅ: {elapsed_minutes}m {elapsed_seconds}s\n"
             f"┖ ᴜsᴇʀ: <a href='tg://user?id={user_id}'>{message.from_user.first_name}</a> | ɪᴅ: {user_id}\n"
         )
@@ -322,8 +348,11 @@ async def handle_message(client: Client, message: Message):
                 current_time = time.time()
                 if current_time - last_progress_update >= UPDATE_INTERVAL:
                     elapsed = datetime.now() - start_time
+                    progress_percentage = ((i) / parts) * 100
+                    
                     status_text = (
                         f"✂️ Splitting {os.path.basename(input_path)}\n"
+                        f"{create_progress_bar(progress_percentage)}\n"
                         f"Part {i+1}/{parts}\n"
                         f"Elapsed: {elapsed.seconds // 60}m {elapsed.seconds % 60}s"
                     )
@@ -369,6 +398,7 @@ async def handle_message(client: Client, message: Message):
                     await update_status(
                         status_message,
                         f"📤 Uploading part {i+1}/{len(split_files)}\n"
+                        f"{create_progress_bar((i/len(split_files))*100)}\n"
                         f"{os.path.basename(part)}"
                     )
                     
@@ -400,6 +430,7 @@ async def handle_message(client: Client, message: Message):
             await update_status(
                 status_message,
                 f"📤 Uploading {download.name}\n"
+                f"{create_progress_bar(0)}\n"
                 f"Size: {format_size(file_size)}"
             )
             
