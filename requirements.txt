@@ -1,8 +1,10 @@
-uvloop
-requests
-aria2p
-git+https://github.com/Hrishi2861/pyrofork-2.2.11-peer-fix.git
-python-dotenv
-pytz
-tgcrypto
-flask
+# Bot dependencies
+pyrogram==2.2.11 # PyroFork version used in the bot
+tgcrypto # For faster cryptography with Pyrogram
+aria2p==0.11.2 # For download management
+python-dotenv # For environment variables management
+flask # For web server
+python-magic # For file type detection
+asyncio # For async operations
+requests # For API requests
+logging # For logging (standard library)
