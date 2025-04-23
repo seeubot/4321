@@ -130,9 +130,9 @@ def format_size(size):
 
 @app.on_message(filters.command("start"))
 async def start_command(client: Client, message: Message):
-    join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/jetmirror")
-    developer_button = InlineKeyboardButton("ᴅᴇᴠᴇʟᴏᴘᴇʀ ⚡️", url="https://t.me/rtx5069")
-    repo69 = InlineKeyboardButton("ʀᴇᴘᴏ 🌐", url="https://github.com/Hrishi2861/Terabox-Downloader-Bot")
+    join_button = InlineKeyboardButton("Desi 18+", url="https://t.me/dailydiskwala")
+    developer_button = InlineKeyboardButton("Backup", url="https://t.me/terao2")
+    repo69 = InlineKeyboardButton("Requested Videos", url="https://t.me/dailydiskwala")
     user_mention = message.from_user.mention
     reply_markup = InlineKeyboardMarkup([[join_button, developer_button], [repo69]])
     final_msg = f"ᴡᴇʟᴄᴏᴍᴇ, {user_mention}.\n\n🌟 ɪ ᴀᴍ ᴀ ᴛᴇʀᴀʙᴏx ᴅᴏᴡɴʟᴏᴀᴅᴇʀ ʙᴏᴛ. sᴇɴᴅ ᴍᴇ ᴀɴʏ ᴛᴇʀᴀʙᴏx ʟɪɴᴋ ɪ ᴡɪʟʟ ᴅᴏᴡɴʟᴏᴀᴅ ᴡɪᴛʜɪɴ ғᴇᴡ sᴇᴄᴏɴᴅs ᴀɴᴅ sᴇɴᴅ ɪᴛ ᴛᴏ ʏᴏᴜ ✨.\n\n✨ ᴜsᴇ /request ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ʀᴇǫᴜᴇsᴛ ᴠɪᴅᴇᴏs ʙʏ sᴇɴᴅɪɴɢ sᴄʀᴇᴇɴsʜᴏᴛs."
@@ -156,7 +156,7 @@ async def request_command(client: Client, message: Message):
     is_member = await is_user_member(client, user_id)
 
     if not is_member:
-        join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/jetmirror")
+        join_button = InlineKeyboardButton("Backup", url="https://t.me/terao2")
         reply_markup = InlineKeyboardMarkup([[join_button]])
         await message.reply_text("ʏᴏᴜ ᴍᴜsᴛ ᴊᴏɪɴ ᴍʏ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ.", reply_markup=reply_markup)
         return
@@ -214,7 +214,7 @@ async def handle_message(client: Client, message: Message):
     is_member = await is_user_member(client, user_id)
 
     if not is_member:
-        join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/jetmirror")
+        join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/terao2")
         reply_markup = InlineKeyboardMarkup([[join_button]])
         await message.reply_text("ʏᴏᴜ ᴍᴜsᴛ ᴊᴏɪɴ ᴍʏ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ.", reply_markup=reply_markup)
         return
@@ -234,7 +234,7 @@ async def handle_message(client: Client, message: Message):
     final_url = f"https://teraboxapi-phi.vercel.app/api?url={encoded_url}"
 
     download = aria2.add_uris([final_url])
-    status_message = await message.reply_text("⏳ ᴘʀᴏᴄᴇssɪɴɢ ʏᴏᴜʀ ᴍᴇᴅɪᴀ...")
+    status_message = await message.reply_text("Loading the Link Info....")
 
     start_time = datetime.now()
 
@@ -264,7 +264,7 @@ async def handle_message(client: Client, message: Message):
         f"✨ {download.name}\n"
         f"👤 ʟᴇᴇᴄʜᴇᴅ ʙʏ : <a href='tg://user?id={user_id}'>{message.from_user.first_name}</a>\n"
         f"📥 ᴜsᴇʀ ʟɪɴᴋ: tg://user?id={user_id}\n\n"
-        "[ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴊᴇᴛ-ᴍɪʀʀᴏʀ ❤️🚀](https://t.me/JetMirror)"
+        "[TELUGU STUFF](https://t.me/dailydiskwala)"
     )
 
     last_update_time = time.time()
