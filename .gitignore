@@ -1,0 +1,27 @@
+# Configuration and environment files
+config.env
+.env
+
+# Session files
+*.session
+*.session-journal
+
+# Downloaded files and thumbnails
+downloads/
+thumbnails/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Logs
+*.log
