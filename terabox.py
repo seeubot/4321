@@ -370,6 +370,19 @@ async def handle_admin_reply(client, message):
         if "ʀᴇǫᴜᴇsᴛ ɪᴅ:" in line:
             request_id_match = line.split("`")[1] if len(line.split("`")) > 1 else None
             break
+async def handle_admin_reply(client, message):
+    # Check if the message is a reply
+    if not message.reply_to_message:
+        return
+    
+    # Check if the replied-to message contains a request ID
+    replied_text = message.reply_to_message.text or message.reply_to_message.caption or ""
+    request_id_match = None
+    
+    for line in replied_text.split("\n"):
+        if "ʀᴇǫᴜᴇsᴛ ɪᴅ:" in line:
+            request_id_match = line.split("`")[1] if len(line.split("`")) > 1 else None
+            break
     
     if not request_id_match or request_id_match not in pending_requests:
         return
@@ -398,20 +411,31 @@ async def handle_admin_reply(client, message):
             
             # Notify the user that their request is being processed
             try:
-               # Process Terabox link and send to user
-            status_msg = await client.send_message(
-                user_id,
-                "⬇️ Downloading your requested video...\n\nThis may take some time depending on the file size."
-            )
-            
-            # Download and process the Terabox link
-            try:
-                await process_url(client, message, terabox_url, user_id=user_id, status_message=status_msg)
+                # Process Terabox link and send to user
+                status_msg = await client.send_message(
+                    user_id,
+                    "⬇️ Downloading your requested video...\n\nThis may take some time depending on the file size."
+                )
                 
-                # Mark request as fulfilled
-                pending_requests[request_id_match]["status"] = "fulfilled"
-                await message.reply_text("✅ File successfully sent to the user!")
-                
+                # Download and process the Terabox link
+                try:
+                    await process_url(client, message, terabox_url, user_id=user_id, status_message=status_msg)
+                    
+                    # Mark request as fulfilled
+                    pending_requests[request_id_match]["status"] = "fulfilled"
+                    await message.reply_text("✅ File successfully sent to the user!")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to process Terabox link: {e}")
+                    await message.reply_text(f"❌ Failed to process the link: {str(e)}")
+                    await client.send_message(
+                        user_id,
+                        "❌ Sorry, there was an error processing your requested video. Please try again later."
+                    )
+            except Exception as e:
+                await message.reply_text(f"❌ Failed to notify user: {str(e)}")
+        else:
+            await message.reply_text("❌ Invalid Terabox URL. Please provide a valid Terabox link.")
             except Exception as e:
                 logger.error(f"Failed to process Terabox link: {e}")
                 await message.reply_text(f"❌ Failed to process the link: {str(e)}")
