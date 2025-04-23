@@ -421,271 +421,508 @@ async def handle_admin_reply(client, message):
                     )
             except Exception as e:
                 await message.reply_text(f"❌ Failed to notify user: {str(e)}")
-       else:
-            await message.reply_text("❌ Invalid Terabox URL. Please provide a valid Terabox link.")
+        else:
+            await message.reply_text("❌ Invalid Terabox URL. Please provide a valid Terabox link.")async def process_url(client, message, url, user_id=None, status_message=None):
+    target_chat_id = user_id if user_id else message.chat.id
+    
+    # Check if URL is valid
+    if not is_valid_url(url):
+        await client.send_message(target_chat_id, "❌ Invalid Terabox URL. Please send a valid Terabox link.")
+        return
+
+    # Show processing message if status_message not provided
+    status_msg = status_message
+    if not status_msg:
+        status_msg = await client.send_message(target_chat_id, "⏳ Processing your link... Please wait.")
+    
+    try:
+        # Update status message
+        await status_msg.edit_text("🔍 Fetching file details...")
+        
+        # Make API request
+        encoded_url = urllib.parse.quote(url)
+        api_url = f"{TERABOX_API_URL}{encoded_url}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, timeout=60) as response:
+                if response.status != 200:
+                    await status_msg.edit_text(f"❌ API Error: {response.status} - {response.reason}")
+                    return
+                
+                data = await response.json()
+                
+                if data.get("status") != "ok":
+                    error_msg = data.get("error", "Unknown error")
+                    await status_msg.edit_text(f"❌ Error: {error_msg}")
+                    return
+                
+                file_list = data.get("list", [])
+                if not file_list:
+                    await status_msg.edit_text("❌ No files found in this link.")
+                    return
+                
+                # Process each file
+                for file_index, file_info in enumerate(file_list):
+                    file_name = file_info.get("filename", f"file_{file_index}")
+                    file_size = int(file_info.get("size", 0))
+                    download_url = file_info.get("direct_link")
+                    
+                    if not download_url:
+                        await client.send_message(
+                            target_chat_id, 
+                            f"❌ Failed to get download link for {file_name}"
+                        )
+                        continue
+                    
+                    # Update status
+                    await status_msg.edit_text(
+                        f"📥 Preparing to download:\n"
+                        f"File: {file_name}\n"
+                        f"Size: {format_size(file_size)}"
+                    )
+                    
+                    # Check if file size is larger than Telegram's limit
+                    if file_size > 2097152000:  # 2GB - Telegram limit for bots
+                        if USER_SESSION_STRING and file_size <= SPLIT_SIZE:
+                            # Can download with user account
+                            await status_msg.edit_text(
+                                f"📥 File size: {format_size(file_size)}\n"
+                                f"Using user account to send larger file..."
+                            )
+                            await download_and_send_with_user(
+                                user, file_name, download_url, target_chat_id, 
+                                file_size, status_msg
+                            )
+                        else:
+                            # Need to split the file
+                            await status_msg.edit_text(
+                                f"📥 File size: {format_size(file_size)}\n"
+                                f"File is too large, splitting into parts..."
+                            )
+                            await split_and_download(
+                                client, download_url, file_name, target_chat_id, 
+                                file_size, status_msg
+                            )
+                    else:
+                        # Regular download and send
+                        await download_and_send(
+                            client, download_url, file_name, target_chat_id, 
+                            file_size, status_msg
+                        )
+        
+    except Exception as e:
+        logger.error(f"Error processing URL: {str(e)}")
+        try:
+            await status_msg.edit_text(f"❌ Error: {str(e)}")
+        except:
+            await client.send_message(target_chat_id, f"❌ Error: {str(e)}")
+
+async def download_and_send(client, download_url, file_name, chat_id, file_size, status_msg):
+    try:
+        temp_dir = f"downloads/{chat_id}"
+        os.makedirs(temp_dir, exist_ok=True)
+        file_path = os.path.join(temp_dir, file_name)
+        
+        async with aiohttp.ClientSession() as session:
+            # Download the file
+            success = await direct_download(download_url, file_path, session, status_msg)
+            if not success:
+                await status_msg.edit_text("❌ Download failed. Please try again later.")
+                return
             
-@app.on_message(filters.text & filters.private & ~filters.command)
-async def handle_url(client, message):
+            # Update status
+            await status_msg.edit_text(f"✅ Download completed! Sending to Telegram...")
+            
+            # Determine file type and send accordingly
+            file_ext = os.path.splitext(file_name)[1].lower()
+            
+            try:
+                # Send file based on extension
+                if file_ext in ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm']:
+                    # Send as video
+                    await client.send_video(
+                        chat_id=chat_id,
+                        video=file_path,
+                        caption=f"📂 Filename: {file_name}\n💾 Size: {format_size(file_size)}",
+                        progress=progress_callback,
+                        progress_args=(status_msg, "Uploading", file_name)
+                    )
+                elif file_ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
+                    # Send as audio
+                    await client.send_audio(
+                        chat_id=chat_id,
+                        audio=file_path,
+                        caption=f"📂 Filename: {file_name}\n💾 Size: {format_size(file_size)}",
+                        progress=progress_callback,
+                        progress_args=(status_msg, "Uploading", file_name)
+                    )
+                elif file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                    # Send as photo
+                    await client.send_photo(
+                        chat_id=chat_id,
+                        photo=file_path,
+                        caption=f"📂 Filename: {file_name}\n💾 Size: {format_size(file_size)}"
+                    )
+                else:
+                    # Send as document
+                    await client.send_document(
+                        chat_id=chat_id,
+                        document=file_path,
+                        caption=f"📂 Filename: {file_name}\n💾 Size: {format_size(file_size)}",
+                        progress=progress_callback,
+                        progress_args=(status_msg, "Uploading", file_name)
+                    )
+                
+                await status_msg.edit_text("✅ File sent successfully!")
+                
+            except FloodWait as e:
+                await status_msg.edit_text(f"⚠️ Telegram FloodWait: Waiting for {e.value} seconds")
+                await asyncio.sleep(e.value)
+                await status_msg.edit_text("⏳ Retrying upload...")
+                await client.send_document(
+                    chat_id=chat_id,
+                    document=file_path,
+                    caption=f"📂 Filename: {file_name}\n💾 Size: {format_size(file_size)}"
+                )
+                await status_msg.edit_text("✅ File sent successfully!")
+                
+            except Exception as e:
+                logger.error(f"Error sending file: {e}")
+                await status_msg.edit_text(f"❌ Failed to send file: {str(e)}")
+                
+            finally:
+                # Clean up downloaded file
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    
+    except Exception as e:
+        logger.error(f"Error in download_and_send: {str(e)}")
+        await status_msg.edit_text(f"❌ Error: {str(e)}")
+
+async def download_and_send_with_user(user_client, file_name, download_url, chat_id, file_size, status_msg):
+    try:
+        temp_dir = f"downloads/{chat_id}"
+        os.makedirs(temp_dir, exist_ok=True)
+        file_path = os.path.join(temp_dir, file_name)
+        
+        async with aiohttp.ClientSession() as session:
+            # Download the file
+            await status_msg.edit_text("⬇️ Downloading large file using user account...")
+            success = await direct_download(download_url, file_path, session, status_msg)
+            if not success:
+                await status_msg.edit_text("❌ Download failed. Please try again later.")
+                return
+            
+            # Update status
+            await status_msg.edit_text(f"✅ Download completed! Sending to Telegram...")
+            
+            # Send file using user account
+            file_ext = os.path.splitext(file_name)[1].lower()
+            
+            try:
+                # Send to dump channel first
+                if file_ext in ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm']:
+                    # Send as video
+                    dump_msg = await user_client.send_video(
+                        chat_id=DUMP_CHAT_ID,
+                        video=file_path,
+                        caption=f"📂 Filename: {file_name}\n💾 Size: {format_size(file_size)}",
+                        progress=progress_callback,
+                        progress_args=(status_msg, "Uploading to Dump Channel", file_name)
+                    )
+                    # Forward to user
+                    await dump_msg.forward(chat_id)
+                else:
+                    # Send as document
+                    dump_msg = await user_client.send_document(
+                        chat_id=DUMP_CHAT_ID,
+                        document=file_path,
+                        caption=f"📂 Filename: {file_name}\n💾 Size: {format_size(file_size)}",
+                        progress=progress_callback,
+                        progress_args=(status_msg, "Uploading to Dump Channel", file_name)
+                    )
+                    # Forward to user
+                    await dump_msg.forward(chat_id)
+                
+                await status_msg.edit_text("✅ File sent successfully!")
+                
+            except FloodWait as e:
+                await status_msg.edit_text(f"⚠️ Telegram FloodWait: Waiting for {e.value} seconds")
+                await asyncio.sleep(e.value)
+                await status_msg.edit_text("⏳ Retrying upload...")
+                await user_client.send_document(
+                    chat_id=DUMP_CHAT_ID,
+                    document=file_path,
+                    caption=f"📂 Filename: {file_name}\n💾 Size: {format_size(file_size)}"
+                )
+                await status_msg.edit_text("✅ File sent successfully!")
+                
+            except Exception as e:
+                logger.error(f"Error sending file with user: {e}")
+                await status_msg.edit_text(f"❌ Failed to send file: {str(e)}")
+                
+            finally:
+                # Clean up downloaded file
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    
+    except Exception as e:
+        logger.error(f"Error in download_and_send_with_user: {str(e)}")
+        await status_msg.edit_text(f"❌ Error: {str(e)}")
+
+async def split_and_download(client, download_url, file_name, chat_id, file_size, status_msg):
+    try:
+        temp_dir = f"downloads/{chat_id}/split_{int(time.time())}"
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Calculate number of parts
+        part_size = 2000 * 1024 * 1024  # ~2GB chunks
+        total_parts = math.ceil(file_size / part_size)
+        
+        await status_msg.edit_text(f"File will be split into {total_parts} parts")
+        
+        file_parts = []
+        
+        async with aiohttp.ClientSession() as session:
+            for part_num in range(total_parts):
+                start_byte = part_num * part_size
+                end_byte = min((part_num + 1) * part_size - 1, file_size - 1)
+                
+                part_file = f"{file_name}.part{part_num+1:03d}"
+                part_path = os.path.join(temp_dir, part_file)
+                
+                await status_msg.edit_text(
+                    f"⬇️ Downloading part {part_num+1}/{total_parts}\n"
+                    f"Range: {format_size(start_byte)} - {format_size(end_byte)}"
+                )
+                
+                # Add range header for partial download
+                headers = {"Range": f"bytes={start_byte}-{end_byte}"}
+                
+                try:
+                    # Download part
+                    async with session.get(download_url, headers=headers) as response:
+                        with open(part_path, 'wb') as f:
+                            # Download with progress tracking
+                            total_downloaded = 0
+                            part_size = end_byte - start_byte + 1
+                            last_update_time = time.time()
+                            
+                            async for chunk in response.content.iter_chunked(1024*1024):  # 1MB chunks
+                                if chunk:
+                                    f.write(chunk)
+                                    total_downloaded += len(chunk)
+                                    
+                                    # Update progress every 3 seconds
+                                    current_time = time.time()
+                                    if current_time - last_update_time >= 3:
+                                        progress = (total_downloaded / part_size) * 100
+                                        await status_msg.edit_text(
+                                            f"⬇️ Downloading part {part_num+1}/{total_parts}\n"
+                                            f"Progress: {progress:.2f}%\n"
+                                            f"Downloaded: {format_size(total_downloaded)} / {format_size(part_size)}"
+                                        )
+                                        last_update_time = current_time
+                    
+                    file_parts.append(part_path)
+                    
+                    # Update message
+                    await status_msg.edit_text(
+                        f"✅ Part {part_num+1}/{total_parts} downloaded.\n"
+                        f"Sending to Telegram..."
+                    )
+                    
+                    # Send part
+                    await client.send_document(
+                        chat_id=chat_id,
+                        document=part_path,
+                        caption=f"📂 {file_name} - Part {part_num+1}/{total_parts}\n"
+                               f"💾 Size: {format_size(os.path.getsize(part_path))}",
+                        progress=progress_callback,
+                        progress_args=(status_msg, f"Uploading Part {part_num+1}", part_file)
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Error downloading part {part_num+1}: {e}")
+                    await status_msg.edit_text(f"❌ Error downloading part {part_num+1}: {str(e)}")
+                    return
+        
+        # All parts sent successfully
+        await status_msg.edit_text(
+            f"✅ All {total_parts} parts have been sent successfully.\n\n"
+            f"To rejoin the parts on your computer, use:\n"
+            f"- Windows: copy /b file.part* combinedfile\n"
+            f"- Linux/Mac: cat file.part* > combinedfile"
+        )
+        
+        # Clean up
+        for part in file_parts:
+            if os.path.exists(part):
+                os.remove(part)
+        
+        if os.path.exists(temp_dir):
+            os.rmdir(temp_dir)
+            
+    except Exception as e:
+        logger.error(f"Error in split_and_download: {str(e)}")
+        await status_msg.edit_text(f"❌ Error: {str(e)}")
+
+async def progress_callback(current, total, status_msg, action, filename):
+    try:
+        if total:
+            percent = current * 100 / total
+            progress_bar = "▓" * int(percent/5) + "░" * (20 - int(percent/5))
+            
+            # Calculate speed and ETA
+            elapsed_time = time.time() - progress_callback.start_time
+            speed = current / elapsed_time if elapsed_time > 0 else 0
+            eta = (total - current) / speed if speed > 0 else 0
+            
+            # Format ETA
+            eta_mins = int(eta // 60)
+            eta_secs = int(eta % 60)
+            
+            await status_msg.edit_text(
+                f"**{action}:** `{filename}`\n\n"
+                f"**Progress:** {current}/{total} ({percent:.1f}%)\n"
+                f"[{progress_bar}]\n"
+                f"**Speed:** {format_size(speed)}/s\n"
+                f"**ETA:** {eta_mins}m {eta_secs}s"
+            )
+    except Exception as e:
+        # Don't crash on progress update errors
+        logger.error(f"Progress callback error: {str(e)}")
+
+# Initialize progress_callback.start_time
+progress_callback.start_time = time.time()
+
+@app.on_message(filters.text & filters.private)
+async def handle_terabox_link(client: Client, message: Message):
     user_id = message.from_user.id
     is_member = await is_user_member(client, user_id)
-    
+
     if not is_member:
         join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/dailydiskwala")
         reply_markup = InlineKeyboardMarkup([[join_button]])
         await message.reply_text("ʏᴏᴜ ᴍᴜsᴛ ᴊᴏɪɴ ᴍʏ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ.", reply_markup=reply_markup)
         return
-        
+
     url = message.text.strip()
-    if is_valid_url(url):
-        status_message = await message.reply_text("⏳ Processing your Terabox link...")
-        await process_url(client, message, url, status_message=status_message)
-    else:
-        await message.reply_text("❌ Invalid URL. Please send a valid Terabox link.")
-
-async def process_url(client, message, url, user_id=None, status_message=None):
-    target_user_id = user_id if user_id else message.from_user.id
     
-    try:
-        # Update status message
-        if status_message:
-            await status_message.edit_text("🔄 Fetching file information...")
-        
-        # Encode URL for API
-        encoded_url = urllib.parse.quote(url)
-        api_url = f"{TERABOX_API_URL}{encoded_url}"
-        
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.get(api_url, timeout=60) as response:
-                    if response.status != 200:
-                        if status_message:
-                            await status_message.edit_text(f"❌ API Error: HTTP {response.status}")
-                        return
-                        
-                    response_data = await response.json()
-                    
-                    if not response_data.get("ok", False):
-                        error_msg = response_data.get("msg", "Unknown error")
-                        if status_message:
-                            await status_message.edit_text(f"❌ API Error: {error_msg}")
-                        return
-                    
-                    file_info = response_data.get("data", {})
-                    file_name = file_info.get("filename", "unknown_file")
-                    file_size = int(file_info.get("size", 0))
-                    direct_link = file_info.get("dlink", "")
-                    
-                    if not direct_link:
-                        if status_message:
-                            await status_message.edit_text("❌ Failed to get direct download link")
-                        return
-                    
-                    # Update status message with file info
-                    if status_message:
-                        await status_message.edit_text(
-                            f"📦 **File Information:**\n\n"
-                            f"**Name:** {file_name}\n"
-                            f"**Size:** {format_size(file_size)}\n\n"
-                            f"⬇️ Starting download..."
-                        )
-                    
-                    # Check if file size is larger than limit and user session is not available
-                    if file_size > SPLIT_SIZE and not user:
-                        if status_message:
-                            await status_message.edit_text(
-                                f"❌ **File too large for me to handle!**\n\n"
-                                f"**File Size:** {format_size(file_size)}\n"
-                                f"**Maximum Size:** {format_size(SPLIT_SIZE)}\n\n"
-                                f"Try smaller files."
-                            )
-                        return
-                    
-                    temp_dir = f"downloads/{target_user_id}/"
-                    os.makedirs(temp_dir, exist_ok=True)
-                    file_path = os.path.join(temp_dir, file_name)
-                    
-                    # Download the file
-                    download_success = await direct_download(direct_link, file_path, session, status_message)
-                    
-                    if not download_success:
-                        if status_message:
-                            await status_message.edit_text("❌ Download failed. Please try again later.")
-                        return
-                    
-                    # Update status message
-                    if status_message:
-                        await status_message.edit_text("✅ Download completed. Uploading to Telegram...")
-                    
-                    # Send the file to user
-                    await send_file(client, target_user_id, file_path, status_message)
-                    
-                    # Clean up
-                    try:
-                        os.remove(file_path)
-                    except:
-                        pass
-                        
-            except aiohttp.ClientError as e:
-                if status_message:
-                    await status_message.edit_text(f"❌ Connection Error: {str(e)}")
-                    
-    except Exception as e:
-        logger.error(f"Error processing URL: {e}")
-        if status_message:
-            await status_message.edit_text(f"❌ An error occurred: {str(e)}")
+    if is_valid_url(url):
+        await process_url(client, message, url)
+    else:
+        await message.reply_text(
+            "❌ Invalid URL! Please send a valid Terabox link.\n\n"
+            "Supported domains: terabox.com, nephobox.com, 4funbox.com, mirrobox.com, "
+            "momerybox.com, teraboxapp.com, 1024tera.com, terabox.app, gibibox.com, "
+            "goaibox.com, terasharelink.com, teraboxlink.com, terafileshare.com"
+        )
 
-async def send_file(client, user_id, file_path, status_message=None):
-    try:
-        file_size = os.path.getsize(file_path)
-        file_name = os.path.basename(file_path)
-        
-        # Check file extension for type
-        file_ext = os.path.splitext(file_path)[1].lower()
-        
-        # Update status if needed
-        if status_message:
-            await status_message.edit_text(f"📤 Uploading: {file_name}\nSize: {format_size(file_size)}")
-        
-        # Check file size and split if necessary
-        if file_size > SPLIT_SIZE:
-            if user:
-                # Use user session for larger files
-                try:
-                    # Update status
-                    if status_message:
-                        await status_message.edit_text(f"📤 File is large. Uploading with premium session...")
-                    
-                    # Send as document using user session
-                    async with user:
-                        sent_message = await user.send_document(
-                            chat_id=user_id,
-                            document=file_path,
-                            caption=f"📁 **{file_name}**\n\n🔷 Size: {format_size(file_size)}\n\n✅ Powered by @dailydiskwala"
-                        )
-                        
-                    if status_message:
-                        await status_message.edit_text("✅ File uploaded successfully!")
-                        
-                except Exception as e:
-                    logger.error(f"Error in user session upload: {e}")
-                    if status_message:
-                        await status_message.edit_text(f"❌ Failed to upload with premium session: {str(e)}")
-                    
-            else:
-                # Split the file
-                if status_message:
-                    await status_message.edit_text(f"📂 File is too large. Splitting into parts...")
-                
-                # Split logic would be implemented here
-                # This is a placeholder since implementing file splitting would require additional code
-                await status_message.edit_text("❌ File is too large and splitting is not implemented yet.")
-                return
-        else:
-            # File is within size limit, send directly
-            if file_ext in ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm']:
-                await client.send_video(
-                    chat_id=user_id,
-                    video=file_path,
-                    caption=f"🎬 **{file_name}**\n\n🔷 Size: {format_size(file_size)}\n\n✅ Powered by @dailydiskwala"
-                )
-            elif file_ext in ['.mp3', '.wav', '.ogg', '.m4a']:
-                await client.send_audio(
-                    chat_id=user_id,
-                    audio=file_path,
-                    caption=f"🎵 **{file_name}**\n\n🔷 Size: {format_size(file_size)}\n\n✅ Powered by @dailydiskwala"
-                )
-            else:
-                await client.send_document(
-                    chat_id=user_id,
-                    document=file_path,
-                    caption=f"📁 **{file_name}**\n\n🔷 Size: {format_size(file_size)}\n\n✅ Powered by @dailydiskwala"
-                )
-                
-            if status_message:
-                await status_message.edit_text("✅ File uploaded successfully!")
-                
-    except FloodWait as e:
-        if status_message:
-            await status_message.edit_text(f"⚠️ Telegram FloodWait: Waiting for {e.value} seconds")
-        await asyncio.sleep(e.value)
-        # Retry sending
-        return await send_file(client, user_id, file_path, status_message)
-        
-    except Exception as e:
-        logger.error(f"Error sending file: {e}")
-        if status_message:
-            await status_message.edit_text(f"❌ Failed to upload: {str(e)}")
-        raise
+# Flask server to keep the bot alive on hosting platforms
+app_server = Flask(__name__)
 
+@app_server.route('/')
+def index():
+    return "Bot is running!"
+
+def run_flask():
+    app_server.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+
+# Commands for admin use
 @app.on_message(filters.command("stats") & filters.user(ADMIN_IDS))
 async def stats_command(client, message):
     # Get bot statistics
     try:
-        total_requests = len(pending_requests)
-        approved_requests = sum(1 for req in pending_requests.values() if req.get("status") == "approved")
-        fulfilled_requests = sum(1 for req in pending_requests.values() if req.get("status") == "fulfilled")
-        rejected_requests = sum(1 for req in pending_requests.values() if req.get("status") == "rejected")
+        # Count number of pending requests
+        pending_count = len(pending_requests)
         
-        await message.reply_text(
-            f"📊 **Bot Statistics**\n\n"
-            f"**Total Requests:** {total_requests}\n"
-            f"**Approved:** {approved_requests}\n"
-            f"**Fulfilled:** {fulfilled_requests}\n"
-            f"**Rejected:** {rejected_requests}\n"
+        # Get bot uptime
+        uptime = time.time() - bot_start_time
+        days = int(uptime // (24 * 3600))
+        uptime %= (24 * 3600)
+        hours = int(uptime // 3600)
+        uptime %= 3600
+        minutes = int(uptime // 60)
+        
+        # System stats
+        import psutil
+        cpu_usage = psutil.cpu_percent()
+        ram_usage = psutil.virtual_memory().percent
+        disk_usage = psutil.disk_usage('/').percent
+        
+        stats_text = (
+            "📊 **Bot Statistics**\n\n"
+            f"**Uptime:** {days}d {hours}h {minutes}m\n"
+            f"**Pending Requests:** {pending_count}\n"
+            f"**CPU Usage:** {cpu_usage}%\n"
+            f"**RAM Usage:** {ram_usage}%\n"
+            f"**Disk Usage:** {disk_usage}%\n"
         )
+        
+        await message.reply_text(stats_text)
     except Exception as e:
-        await message.reply_text(f"❌ Error generating stats: {str(e)}")
+        await message.reply_text(f"Error getting statistics: {str(e)}")
 
-@app.on_message(filters.command("help"))
-async def help_command(client, message):
-    help_text = (
-        "🔍 **ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴛᴇʀᴀʙᴏx ᴅᴏᴡɴʟᴏᴀᴅᴇʀ ʙᴏᴛ!**\n\n"
-        "📌 **ʜᴏᴡ ᴛᴏ ᴜsᴇ:**\n"
-        "• Sᴇɴᴅ ᴀɴʏ ᴛᴇʀᴀʙᴏx ʟɪɴᴋ ᴅɪʀᴇᴄᴛʟʏ\n"
-        "• Usᴇ /request ᴡɪᴛʜ ᴀ ᴘʜᴏᴛᴏ & ᴅᴇsᴄʀɪᴘᴛɪᴏɴ ᴛᴏ ʀᴇǫᴜᴇsᴛ ᴀ ғɪʟᴇ\n\n"
-        "📜 **ᴄᴏᴍᴍᴀɴᴅs:**\n"
-        "• /start - Sᴛᴀʀᴛ ᴛʜᴇ ʙᴏᴛ\n"
-        "• /help - Sʜᴏᴡ ᴛʜɪs ʜᴇʟᴘ ᴍᴇssᴀɢᴇ\n"
-        "• /request - Rᴇǫᴜᴇsᴛ ᴀ ᴠɪᴅᴇᴏ\n\n"
-        "⭐ Jᴏɪɴ ᴏᴜʀ ᴄʜᴀɴɴᴇʟ: @dailydiskwala"
+@app.on_message(filters.command("broadcast") & filters.user(ADMIN_IDS))
+async def broadcast_command(client, message):
+    # Broadcast message to all users who have pending requests
+    if len(message.text.split(" ", 1)) < 2:
+        await message.reply_text("Usage: /broadcast <message>")
+        return
+        
+    broadcast_text = message.text.split(" ", 1)[1]
+    
+    if not broadcast_text:
+        await message.reply_text("Please provide a message to broadcast.")
+        return
+        
+    # Get unique user IDs from pending requests
+    unique_users = set(req["user_id"] for req in pending_requests.values())
+    
+    success_count = 0
+    fail_count = 0
+    
+    progress_msg = await message.reply_text("Broadcasting message...")
+    
+    for user_id in unique_users:
+        try:
+            await client.send_message(
+                chat_id=user_id,
+                text=f"📢 **Broadcast Message from Admin**\n\n{broadcast_text}"
+            )
+            success_count += 1
+        except Exception as e:
+            logger.error(f"Failed to send broadcast to {user_id}: {e}")
+            fail_count += 1
+    
+    await progress_msg.edit_text(
+        f"✅ Broadcast completed!\n\n"
+        f"Successfully sent: {success_count}\n"
+        f"Failed: {fail_count}"
     )
-    
-    await message.reply_text(help_text)
 
-def start_flask():
-    app = Flask(__name__)
-    
-    @app.route('/')
-    def home():
-        return "Bot is running!"
-    
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+# Record bot start time for uptime tracking
+bot_start_time = time.time()
 
-def main():
-    print(f"Bot is Starting...")
+async def main():
+    await app.start()
+    if user:
+        await user.start()
+    logger.info("Bot started successfully!")
     
+    # Keep the bot running
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
     # Start Flask server in a separate thread
-    flask_thread = Thread(target=start_flask)
+    flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
     
-    # Start the Pyrogram client
-    app.start()
-    
-    if user:
-        user.start()
-        print("User session started")
-    
-    # Log successful startup
-    print(f"Bot Started Successfully!")
-    
-    # Keep the main thread alive
-    idle()
-    
-    # Stop the clients when the script is terminated
-    app.stop()
-    if user:
-        user.stop()
-
-if __name__ == "__main__":
-    main()
+    # Run the bot
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(main())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped!")
