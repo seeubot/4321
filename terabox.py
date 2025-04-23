@@ -115,6 +115,11 @@ else:
 
 app = Client("jetbot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
+# Track client connection state
+app._is_connected = False
+if user:
+    user._is_connected = False
+
 VALID_DOMAINS = [
     'terabox.com', 'nephobox.com', '4funbox.com', 'mirrobox.com', 
     'momerybox.com', 'teraboxapp.com', '1024tera.com', 
@@ -497,7 +502,7 @@ async def process_download(client, url, message, target_user_id=None):
                         f"📤 ᴜᴘʟᴏᴀᴅɪɴɢ ᴘᴀʀᴛ {i+1}/{len(split_files)}"
                     )
                     
-                    if USER_SESSION_STRING:
+                    if USER_SESSION_STRING and user._is_connected:
                         sent = await user.send_video(
                             DUMP_CHAT_ID, part, 
                             caption=part_caption,
@@ -512,20 +517,21 @@ async def process_download(client, url, message, target_user_id=None):
                             caption=part_caption,
                             progress=upload_progress
                         )
-                return True
-            except Exception as e:
-                logger.error(f"Error uploading split file: {e}")
-                return False
-            finally:
-                # Clean up split files
-                for part in split_files:
-                    if os.path.exists(part) and part != file_path:
+                    
+                    # Delete part file after upload
+                    try:
                         os.remove(part)
+                    except Exception as e:
+                        logger.error(f"Error removing part file: {e}")
+            except Exception as e:
+                logger.error(f"Upload error: {e}")
+                await update_status(
+                    status_message,
+                    f"❌ ᴇʀʀᴏʀ ᴜᴘʟᴏᴀᴅɪɴɢ sᴘʟɪᴛ ғɪʟᴇ: {str(e)}"
+                )
         else:
             try:
-                await update_status(status_message, f"📤 ᴜᴘʟᴏᴀᴅɪɴɢ: {download.name}")
-                
-                if USER_SESSION_STRING:
+                if USER_SESSION_STRING and user._is_connected:
                     sent = await user.send_video(
                         DUMP_CHAT_ID, file_path,
                         caption=caption,
@@ -535,101 +541,119 @@ async def process_download(client, url, message, target_user_id=None):
                         target_user_id, DUMP_CHAT_ID, sent.id
                     )
                 else:
-                    await client.send_video(
+                    sent = await client.send_video(
                         target_user_id, file_path,
                         caption=caption,
                         progress=upload_progress
                     )
-                return True
+            except FloodWait as e:
+                logger.warning(f"FloodWait: Sleeping for {e.value}s")
+                await asyncio.sleep(e.value)
+                return await handle_upload()
             except Exception as e:
-                logger.error(f"Error uploading file: {e}")
-                return False
+                # For files not recognized as video, send as document
+                logger.warning(f"Error sending as video: {e}")
+                try:
+                    if USER_SESSION_STRING and user._is_connected:
+                        sent = await user.send_document(
+                            DUMP_CHAT_ID, file_path,
+                            caption=caption,
+                            progress=upload_progress
+                        )
+                        await app.copy_message(
+                            target_user_id, DUMP_CHAT_ID, sent.id
+                        )
+                    else:
+                        sent = await client.send_document(
+                            target_user_id, file_path,
+                            caption=caption,
+                            progress=upload_progress
+                        )
+                except Exception as doc_e:
+                    logger.error(f"Error sending as document: {doc_e}")
+                    await update_status(
+                        status_message,
+                        f"❌ ᴇʀʀᴏʀ ᴜᴘʟᴏᴀᴅɪɴɢ ғɪʟᴇ: {str(doc_e)}"
+                    )
+                    return
 
-    try:
-        upload_success = await handle_upload()
+        # Clean up
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            logger.error(f"Error removing file: {e}")
+
         end_time = datetime.now()
         time_taken = (end_time - start_time).total_seconds()
-        time_taken_str = str(datetime.timedelta(seconds=time_taken))
         
-        if upload_success:
-            final_status = (
-                f"✅ ᴜᴘʟᴏᴀᴅᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!\n"
-                f"📁 ғɪʟᴇ: {download.name}\n"
-                f"⏱️ ᴛɪᴍᴇ ᴛᴀᴋᴇɴ: {time_taken_str}\n"
-                f"📦 sɪᴢᴇ: {format_size(os.path.getsize(file_path))}"
-            )
-        else:
-            final_status = f"❌ ᴜᴘʟᴏᴀᴅ ғᴀɪʟᴇᴅ: {download.name}"
-            
-        await update_status_message(status_message, final_status)
-    except Exception as e:
-        logger.error(f"Error in process_download: {e}")
-        await update_status_message(status_message, f"❌ ᴇʀʀᴏʀ: {str(e)}")
-    finally:
-        # Clean up downloaded file
-        aria2.remove([download])
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        await update_status(
+            status_message,
+            f"✅ ᴅᴏᴡɴʟᴏᴀᴅ ᴀɴᴅ ᴜᴘʟᴏᴀᴅ ᴄᴏᴍᴘʟᴇᴛᴇᴅ ɪɴ {time_taken:.1f} sᴇᴄᴏɴᴅs."
+        )
 
-# Web server for uptime monitoring
-app_flask = Flask(__name__)
+    await handle_upload()
 
-@app_flask.route('/')
+# Initialize Flask app for web interface
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
 def home():
-    return "Bot is running!"
+    return render_template('index.html')
 
-def run_server():
-    app_flask.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+def run_flask():
+    flask_app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
-async def start_user():
-    if USER_SESSION_STRING:
-        try:
-            await user.start()
-            logging.info("User client started successfully")
-        except Exception as e:
-            logging.error(f"Failed to start user client: {e}")
-            global SPLIT_SIZE
-            SPLIT_SIZE = 2093796556
-
-# Clean pending requests older than 24 hours
-async def clean_old_requests():
-    while True:
-        current_time = time.time()
-        expired_requests = []
+# Ensure proper client connection and disconnection
+async def start_clients():
+    global app, user
+    
+    try:
+        await app.start()
+        app._is_connected = True
+        logger.info("Bot client started successfully")
         
-        for req_id, req_data in pending_requests.items():
-            if current_time - req_data['timestamp'] > 86400:  # 24 hours
-                expired_requests.append(req_id)
-        
-        for req_id in expired_requests:
-            del pending_requests[req_id]
-            
-        await asyncio.sleep(3600)  # Check every hour
+        if user:
+            try:
+                await user.start()
+                user._is_connected = True
+                logger.info("User client started successfully")
+            except Exception as e:
+                logger.error(f"Failed to start user client: {e}")
+                user = None
+    except Exception as e:
+        logger.error(f"Failed to start bot client: {e}")
+        exit(1)
+
+async def stop_clients():
+    global app, user
+    
+    if app and app._is_connected:
+        await app.stop()
+        app._is_connected = False
+        logger.info("Bot client stopped")
+    
+    if user and user._is_connected:
+        await user.stop()
+        user._is_connected = False
+        logger.info("User client stopped")
 
 async def main():
-    await start_user()
-    await app.start()
+    # Start the web server in a separate thread
+    web_thread = Thread(target=run_flask)
+    web_thread.daemon = True
+    web_thread.start()
     
-    # Start the request cleanup task
-    asyncio.create_task(clean_old_requests())
+    # Start clients
+    await start_clients()
     
-    # Start web server in a separate thread
-    server_thread = Thread(target=run_server)
-    server_thread.daemon = True
-    server_thread.start()
-    
-    logging.info("Bot started successfully!")
-    
-    # Keep the main task running
-    await asyncio.Event().wait()
+    try:
+        # Keep the main task running
+        await asyncio.Future()
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Received shutdown signal")
+    finally:
+        # Clean shutdown
+        await stop_clients()
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(main())
-    except KeyboardInterrupt:
-        logging.info("Bot stopped by user")
-    finally:
-        loop.run_until_complete(app.stop())
-        if USER_SESSION_STRING:
-            loop.run_until_complete(user.stop())
+    asyncio.run(main())
