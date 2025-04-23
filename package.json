@@ -1,0 +1,24 @@
+{
+  "name": "terabox-downloader-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for downloading files from Terabox and similar services",
+  "main": "index.js",
+  "scripts": {
+    "start": "bash start.sh"
+  },
+  "engines": {
+    "node": "16.x"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/terabox-downloader-bot.git"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "terabox",
+    "downloader"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}
