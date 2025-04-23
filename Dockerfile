@@ -5,18 +5,17 @@ RUN apt-get update && apt-get install -y \
     aria2 \
     ffmpeg \
     libmagic1 \
+    git \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip
 
-# For PyroFork specific installation (if needed)
-# If regular Pyrogram works with the code, this can be removed
-RUN pip install --no-cache-dir git+https://github.com/pyrofork/pyrogram.git@v2.x
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the bot code
 COPY . .
