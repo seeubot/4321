@@ -606,24 +606,30 @@ def run_flask():
 # Ensure proper client connection and disconnection
 async def start_clients():
     global app, user
+    max_retries = 3
+    retry_count = 0
     
-    try:
-        await app.start()
-        app._is_connected = True
-        logger.info("Bot client started successfully")
-        
-        if user:
-            try:
-                await user.start()
-                user._is_connected = True
-                logger.info("User client started successfully")
-            except Exception as e:
-                logger.error(f"Failed to start user client: {e}")
-                user = None
-    except Exception as e:
-        logger.error(f"Failed to start bot client: {e}")
+    while retry_count < max_retries:
+        try:
+            await app.start()
+            app._is_connected = True
+            logger.info("Bot client started successfully")
+            break
+        except Exception as e:
+            if "FLOOD_WAIT" in str(e):
+                wait_time = int(str(e).split("wait of ")[1].split(" seconds")[0])
+                logger.warning(f"Flood wait detected. Waiting for {wait_time} seconds")
+                await asyncio.sleep(wait_time + 5)  # Add 5 seconds as buffer
+                retry_count += 1
+            else:
+                logger.error(f"Failed to start bot client: {e}")
+                exit(1)
+    
+    if retry_count >= max_retries:
+        logger.error("Max retries reached for bot client")
         exit(1)
-
+        
+    # Similar logic for user client
 async def stop_clients():
     global app, user
     
