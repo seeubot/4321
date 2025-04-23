@@ -1,9 +1,7 @@
-# Bot dependencies
-pyrogram>=2.0.106 # Latest stable version of Pyrogram
-tgcrypto # For faster cryptography with Pyrogram
-aria2p==0.11.2 # For download management
-python-dotenv # For environment variables management
-flask # For web server
-python-magic # For file type detection
-asyncio # For async operations
-requests # For API requests
+pyrogram
+tgcrypto
+python-dotenv
+aria2p
+aiohttp
+flask
+requests
