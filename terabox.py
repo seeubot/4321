@@ -16,6 +16,8 @@ from flask import Flask, render_template
 from threading import Thread
 import requests
 import json
+import random
+import string
 
 load_dotenv('config.env', override=True)
 logging.basicConfig(
@@ -76,10 +78,22 @@ if len(FSUB_ID) == 0:
 else:
     FSUB_ID = int(FSUB_ID)
 
+# New config variable for request channel
+REQUEST_CHAT_ID = os.environ.get('REQUEST_CHAT_ID', '')
+if len(REQUEST_CHAT_ID) == 0:
+    logging.warning("REQUEST_CHAT_ID variable is missing! Video request feature will be disabled")
+    REQUEST_CHAT_ID = None
+else:
+    REQUEST_CHAT_ID = int(REQUEST_CHAT_ID)
+
 USER_SESSION_STRING = os.environ.get('USER_SESSION_STRING', '')
 if len(USER_SESSION_STRING) == 0:
     logging.info("USER_SESSION_STRING variable is missing! Bot will split Files in 2Gb...")
     USER_SESSION_STRING = None
+
+# Thumbnail directory
+THUMBNAIL_DIR = "thumbnails"
+os.makedirs(THUMBNAIL_DIR, exist_ok=True)
 
 app = Client("jetbot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -96,6 +110,9 @@ VALID_DOMAINS = [
     'teraboxlink.com', 'terafileshare.com'
 ]
 last_update_time = 0
+
+# User thumbnail storage - in memory dictionary
+user_thumbnails = {}
 
 async def is_user_member(client, user_id):
     try:
@@ -182,6 +199,37 @@ async def get_direct_link(terabox_url):
     except Exception as e:
         return None, f"Unexpected error: {str(e)}"
 
+# Save thumbnail function
+async def save_thumbnail(client, message):
+    user_id = message.from_user.id
+    
+    if not message.photo and not message.document:
+        await message.reply_text("Please send an image as thumbnail.")
+        return False
+    
+    try:
+        if message.photo:
+            # If it's a photo, download it
+            file_path = f"{THUMBNAIL_DIR}/{user_id}.jpg"
+            await client.download_media(message, file_path)
+        else:
+            # If it's a document, check if it's an image
+            if message.document.mime_type and "image" in message.document.mime_type:
+                file_path = f"{THUMBNAIL_DIR}/{user_id}.jpg"
+                await client.download_media(message, file_path)
+            else:
+                await message.reply_text("Please send a valid image file as thumbnail.")
+                return False
+        
+        # Store the path in the dictionary
+        user_thumbnails[user_id] = file_path
+        return True
+    
+    except Exception as e:
+        logger.error(f"Error saving thumbnail: {e}")
+        await message.reply_text("Failed to save thumbnail.")
+        return False
+
 @app.on_message(filters.command("start"))
 async def start_command(client: Client, message: Message):
     join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/terao2")
@@ -189,7 +237,7 @@ async def start_command(client: Client, message: Message):
     repo69 = InlineKeyboardButton("Desi18+", url="https://t.me/dailydiskwala")
     user_mention = message.from_user.mention
     reply_markup = InlineKeyboardMarkup([[join_button, developer_button], [repo69]])
-    final_msg = f"ᴡᴇʟᴄᴏᴍᴇ, {user_mention}.\n\n🌟 ɪ ᴀᴍ ᴀ ᴛᴇʀᴀʙᴏx ᴅᴏᴡɴʟᴏᴀᴅᴇʀ ʙᴏᴛ. sᴇɴᴅ ᴍᴇ ᴀɴʏ ᴛᴇʀᴀʙᴏx ʟɪɴᴋ ɪ ᴡɪʟʟ ᴅᴏᴡɴʟᴏᴀᴅ ᴡɪᴛʜɪɴ ғᴇᴡ sᴇᴄᴏɴᴅs ᴀɴᴅ sᴇɴᴅ ɪᴛ ᴛᴏ ʏᴏᴜ ✨."
+    final_msg = f"ᴡᴇʟᴄᴏᴍᴇ, {user_mention}.\n\n🌟 ɪ ᴀᴍ ᴀ ᴛᴇʀᴀʙᴏx ᴅᴏᴡɴʟᴏᴀᴅᴇʀ ʙᴏᴛ. sᴇɴᴅ ᴍᴇ ᴀɴʏ ᴛᴇʀᴀʙᴏx ʟɪɴᴋ ɪ ᴡɪʟʟ ᴅᴏᴡɴʟᴏᴀᴅ ᴡɪᴛʜɪɴ ғᴇᴡ sᴇᴄᴏɴᴅs ᴀɴᴅ sᴇɴᴅ ɪᴛ ᴛᴏ ʏᴏᴜ ✨.\n\n📱 Commands:\n/thumb - Set a thumbnail for your uploads\n/delthumb - Delete your current thumbnail\n/request - Request videos with image preview"
     video_file_id = "/app/tera.mp4"
     if os.path.exists(video_file_id):
         await client.send_video(
@@ -201,13 +249,169 @@ async def start_command(client: Client, message: Message):
     else:
         await message.reply_text(final_msg, reply_markup=reply_markup)
 
+# Thumbnail command
+@app.on_message(filters.command("thumb"))
+async def thumb_command(client: Client, message: Message):
+    user_id = message.from_user.id
+    is_member = await is_user_member(client, user_id)
+
+    if not is_member:
+        join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/terao2")
+        reply_markup = InlineKeyboardMarkup([[join_button]])
+        await message.reply_text("ʏᴏᴜ ᴍᴜsᴛ ᴊᴏɪɴ ᴍʏ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ.", reply_markup=reply_markup)
+        return
+    
+    if message.reply_to_message:
+        if await save_thumbnail(client, message.reply_to_message):
+            await message.reply_text("✅ Thumbnail saved successfully. It will be used for all your uploads.")
+        return
+    
+    await message.reply_text("Please reply to an image with /thumb to set it as your thumbnail.")
+
+# Delete thumbnail command
+@app.on_message(filters.command("delthumb"))
+async def delete_thumb_command(client: Client, message: Message):
+    user_id = message.from_user.id
+    is_member = await is_user_member(client, user_id)
+
+    if not is_member:
+        join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/terao2")
+        reply_markup = InlineKeyboardMarkup([[join_button]])
+        await message.reply_text("ʏᴏᴜ ᴍᴜsᴛ ᴊᴏɪɴ ᴍʏ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ.", reply_markup=reply_markup)
+        return
+    
+    if user_id in user_thumbnails:
+        try:
+            thumbnail_path = user_thumbnails[user_id]
+            if os.path.exists(thumbnail_path):
+                os.remove(thumbnail_path)
+            del user_thumbnails[user_id]
+            await message.reply_text("✅ Thumbnail deleted successfully.")
+        except Exception as e:
+            logger.error(f"Error deleting thumbnail: {e}")
+            await message.reply_text("❌ Failed to delete thumbnail.")
+    else:
+        await message.reply_text("You don't have any saved thumbnail.")
+
+# Video request command
+@app.on_message(filters.command("request"))
+async def request_command(client: Client, message: Message):
+    user_id = message.from_user.id
+    is_member = await is_user_member(client, user_id)
+
+    if not is_member:
+        join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/terao2")
+        reply_markup = InlineKeyboardMarkup([[join_button]])
+        await message.reply_text("ʏᴏᴜ ᴍᴜsᴛ ᴊᴏɪɴ ᴍʏ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ.", reply_markup=reply_markup)
+        return
+    
+    if not REQUEST_CHAT_ID:
+        await message.reply_text("❌ Video request feature is currently disabled.")
+        return
+    
+    # Check if command has arguments or is replying to a message
+    request_text = ""
+    has_media = False
+    
+    if message.reply_to_message:
+        # Get text from reply if available
+        if message.reply_to_message.text:
+            request_text = message.reply_to_message.text
+        elif message.reply_to_message.caption:
+            request_text = message.reply_to_message.caption
+            
+        # Check if reply has media
+        has_media = (
+            message.reply_to_message.photo or 
+            message.reply_to_message.document or 
+            message.reply_to_message.video or 
+            message.reply_to_message.animation
+        )
+        
+        if not has_media and not request_text:
+            await message.reply_text("❌ Please reply to a message with media or text describing the video you want to request.")
+            return
+    else:
+        # Get text from command
+        command_parts = message.text.split(" ", 1)
+        if len(command_parts) > 1:
+            request_text = command_parts[1].strip()
+        else:
+            await message.reply_text(
+                "📽️ **How to Request Videos:**\n\n"
+                "1️⃣ Send a photo/screenshot of the video you want\n"
+                "2️⃣ Reply to it with `/request <video name or description>`\n\n"
+                "OR\n\n"
+                "• Simply type `/request <detailed video description>`\n\n"
+                "Your request will be forwarded to our team!"
+            )
+            return
+    
+    # Generate a random request ID
+    request_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    
+    # Format caption for forwarding
+    forward_caption = (
+        f"📝 **New Video Request** #{request_id}\n\n"
+        f"👤 Requested by: {message.from_user.mention} (ID: `{user_id}`)\n"
+        f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    )
+    
+    if request_text:
+        forward_caption += f"🎬 **Request Details:**\n{request_text}\n\n"
+    
+    forward_caption += "📨 Reply to this message to contact the requester."
+    
+    try:
+        # If replying to a message with media
+        if message.reply_to_message and has_media:
+            if message.reply_to_message.photo:
+                sent = await client.send_photo(
+                    chat_id=REQUEST_CHAT_ID,
+                    photo=message.reply_to_message.photo.file_id,
+                    caption=forward_caption
+                )
+            elif message.reply_to_message.document:
+                sent = await client.send_document(
+                    chat_id=REQUEST_CHAT_ID,
+                    document=message.reply_to_message.document.file_id,
+                    caption=forward_caption
+                )
+            elif message.reply_to_message.video:
+                sent = await client.send_video(
+                    chat_id=REQUEST_CHAT_ID,
+                    video=message.reply_to_message.video.file_id,
+                    caption=forward_caption
+                )
+            elif message.reply_to_message.animation:
+                sent = await client.send_animation(
+                    chat_id=REQUEST_CHAT_ID,
+                    animation=message.reply_to_message.animation.file_id,
+                    caption=forward_caption
+                )
+        else:
+            # Text-only request
+            sent = await client.send_message(
+                chat_id=REQUEST_CHAT_ID,
+                text=forward_caption
+            )
+        
+        await message.reply_text(
+            f"✅ Your video request has been submitted successfully!\n"
+            f"📌 Request ID: `{request_id}`\n\n"
+            f"Our team will process your request soon."
+        )
+    except Exception as e:
+        logger.error(f"Failed to forward request: {e}")
+        await message.reply_text("❌ Failed to submit your request. Please try again later.")
+
 async def update_status_message(status_message, text):
     try:
         await status_message.edit_text(text)
     except Exception as e:
         logger.error(f"Failed to update status message: {e}")
 
-@app.on_message(filters.text)
+@app.on_message(filters.text & ~filters.command)
 async def handle_message(client: Client, message: Message):
     if message.text.startswith('/'):
         return
@@ -380,6 +584,9 @@ async def handle_message(client: Client, message: Message):
     async def handle_upload():
         file_size = os.path.getsize(file_path)
         
+        # Get user's thumbnail if exists
+        thumbnail = user_thumbnails.get(user_id, None)
+        
         if file_size > SPLIT_SIZE:
             await update_status(
                 status_message,
@@ -406,6 +613,7 @@ async def handle_message(client: Client, message: Message):
                         sent = await user.send_video(
                             DUMP_CHAT_ID, part, 
                             caption=part_caption,
+                            thumb=thumbnail,  # Use the saved thumbnail
                             progress=upload_progress
                         )
                         await app.copy_message(
@@ -415,6 +623,7 @@ async def handle_message(client: Client, message: Message):
                         sent = await client.send_video(
                             DUMP_CHAT_ID, part,
                             caption=part_caption,
+                            thumb=thumbnail,  # Use the saved thumbnail
                             progress=upload_progress
                         )
                         await client.send_video(
@@ -438,6 +647,7 @@ async def handle_message(client: Client, message: Message):
                 sent = await user.send_video(
                     DUMP_CHAT_ID, file_path,
                     caption=caption,
+                    thumb=thumbnail,  # Use the saved thumbnail
                     progress=upload_progress
                 )
                 await app.copy_message(
@@ -447,6 +657,7 @@ async def handle_message(client: Client, message: Message):
                 sent = await client.send_video(
                     DUMP_CHAT_ID, file_path,
                     caption=caption,
+                    thumb=thumbnail,  # Use the saved thumbnail
                     progress=upload_progress
                 )
                 await client.send_video(
