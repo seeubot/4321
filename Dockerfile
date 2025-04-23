@@ -1,11 +1,12 @@
 FROM python:3.9-slim
 
-# Install system dependencies
+# Install system dependencies including procps for pgrep
 RUN apt-get update && apt-get install -y \
     aria2 \
     ffmpeg \
     libmagic1 \
     git \
+    procps \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
