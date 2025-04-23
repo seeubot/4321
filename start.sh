@@ -9,5 +9,8 @@ else
     echo "aria2c is already running"
 fi
 
+# Patch the code to work with standard Pyrogram
+python patch_pyrogram.py
+
 # Start the bot
 python terabox.py
