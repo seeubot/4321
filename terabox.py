@@ -6,7 +6,7 @@ import os
 import logging
 import math
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.errors import FloodWait
 import time
@@ -74,7 +74,7 @@ if len(FSUB_ID) == 0:
 else:
     FSUB_ID = int(FSUB_ID)
 
-# New environment variable for request channel
+# Request channel configuration
 REQUEST_CHANNEL_ID = os.environ.get('REQUEST_CHANNEL_ID', '')
 if len(REQUEST_CHANNEL_ID) == 0:
     logging.warning("REQUEST_CHANNEL_ID variable is missing! Video requests will not be stored.")
@@ -82,18 +82,38 @@ if len(REQUEST_CHANNEL_ID) == 0:
 else:
     REQUEST_CHANNEL_ID = int(REQUEST_CHANNEL_ID)
 
+# Admin users who can approve requests
+ADMIN_USERS = os.environ.get('ADMIN_USERS', '')
+if len(ADMIN_USERS) == 0:
+    logging.warning("ADMIN_USERS variable is missing! No users will be able to approve requests.")
+    ADMIN_USERS = []
+else:
+    try:
+        ADMIN_USERS = [int(admin.strip()) for admin in ADMIN_USERS.split(',')]
+        logging.info(f"Admin users: {ADMIN_USERS}")
+    except ValueError:
+        logging.error("ADMIN_USERS format is incorrect. Should be comma-separated user IDs.")
+        ADMIN_USERS = []
+
+# User session handling with error management
 USER_SESSION_STRING = os.environ.get('USER_SESSION_STRING', '')
 if len(USER_SESSION_STRING) == 0:
     logging.info("USER_SESSION_STRING variable is missing! Bot will split Files in 2Gb...")
     USER_SESSION_STRING = None
+    user = None
+    SPLIT_SIZE = 2093796556
+else:
+    try:
+        user = Client("jetu", api_id=API_ID, api_hash=API_HASH, session_string=USER_SESSION_STRING)
+        SPLIT_SIZE = 4241280205
+    except Exception as e:
+        logging.error(f"Error initializing user client: {e}")
+        logging.info("Falling back to bot-only mode. Files will be split at 2GB.")
+        USER_SESSION_STRING = None
+        user = None
+        SPLIT_SIZE = 2093796556
 
 app = Client("jetbot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-
-user = None
-SPLIT_SIZE = 2093796556
-if USER_SESSION_STRING:
-    user = Client("jetu", api_id=API_ID, api_hash=API_HASH, session_string=USER_SESSION_STRING)
-    SPLIT_SIZE = 4241280205
 
 VALID_DOMAINS = [
     'terabox.com', 'nephobox.com', '4funbox.com', 'mirrobox.com', 
@@ -102,6 +122,9 @@ VALID_DOMAINS = [
     'teraboxlink.com', 'terafileshare.com'
 ]
 last_update_time = 0
+
+# Dictionary to store pending requests data
+pending_requests = {}
 
 async def is_user_member(client, user_id):
     try:
@@ -130,13 +153,13 @@ def format_size(size):
 
 @app.on_message(filters.command("start"))
 async def start_command(client: Client, message: Message):
-    join_button = InlineKeyboardButton("Desi 18+", url="https://t.me/dailydiskwala")
-    developer_button = InlineKeyboardButton("Backup", url="https://t.me/terao2")
-    repo69 = InlineKeyboardButton("Requested Videos", url="https://t.me/dailydiskwala")
+    join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/jetmirror")
+    developer_button = InlineKeyboardButton("ᴅᴇᴠᴇʟᴏᴘᴇʀ ⚡️", url="https://t.me/rtx5069")
+    repo69 = InlineKeyboardButton("ʀᴇᴘᴏ 🌐", url="https://github.com/Hrishi2861/Terabox-Downloader-Bot")
     user_mention = message.from_user.mention
     reply_markup = InlineKeyboardMarkup([[join_button, developer_button], [repo69]])
     final_msg = f"ᴡᴇʟᴄᴏᴍᴇ, {user_mention}.\n\n🌟 ɪ ᴀᴍ ᴀ ᴛᴇʀᴀʙᴏx ᴅᴏᴡɴʟᴏᴀᴅᴇʀ ʙᴏᴛ. sᴇɴᴅ ᴍᴇ ᴀɴʏ ᴛᴇʀᴀʙᴏx ʟɪɴᴋ ɪ ᴡɪʟʟ ᴅᴏᴡɴʟᴏᴀᴅ ᴡɪᴛʜɪɴ ғᴇᴡ sᴇᴄᴏɴᴅs ᴀɴᴅ sᴇɴᴅ ɪᴛ ᴛᴏ ʏᴏᴜ ✨.\n\n✨ ᴜsᴇ /request ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ʀᴇǫᴜᴇsᴛ ᴠɪᴅᴇᴏs ʙʏ sᴇɴᴅɪɴɢ sᴄʀᴇᴇɴsʜᴏᴛs."
-    video_file_id = "/app/tera.mp4"
+    video_file_id = "/app/Jet-Mirror.mp4"
     if os.path.exists(video_file_id):
         await client.send_video(
             chat_id=message.chat.id,
@@ -156,7 +179,7 @@ async def request_command(client: Client, message: Message):
     is_member = await is_user_member(client, user_id)
 
     if not is_member:
-        join_button = InlineKeyboardButton("Backup", url="https://t.me/terao2")
+        join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/jetmirror")
         reply_markup = InlineKeyboardMarkup([[join_button]])
         await message.reply_text("ʏᴏᴜ ᴍᴜsᴛ ᴊᴏɪɴ ᴍʏ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ.", reply_markup=reply_markup)
         return
@@ -175,20 +198,40 @@ async def request_command(client: Client, message: Message):
             await message.reply_text("ᴘʟᴇᴀsᴇ ᴀᴅᴅ ᴀ ᴅᴇsᴄʀɪᴘᴛɪᴏɴ ᴏғ ᴛʜᴇ ᴠɪᴅᴇᴏ ʏᴏᴜ'ʀᴇ ʀᴇǫᴜᴇsᴛɪɴɢ.")
             return
         
+        # Create a random request ID
+        request_id = f"req_{int(time.time())}_{user_id}"
+        
+        # Create approve button
+        approve_button = InlineKeyboardButton(
+            "✅ ᴀᴘᴘʀᴏᴠᴇ & sᴇɴᴅ", 
+            callback_data=f"approve_{request_id}"
+        )
+        reply_markup = InlineKeyboardMarkup([[approve_button]])
+        
         # Forward the request to the admin channel
         try:
             caption = (
-                f"📝 ᴠɪᴅᴇᴏ ʀᴇǫᴜᴇsᴛ\n\n"
+                f"📝 ᴠɪᴅᴇᴏ ʀᴇǫᴜᴇsᴛ | ɪᴅ: {request_id}\n\n"
                 f"👤 ᴜsᴇʀ: <a href='tg://user?id={user_id}'>{message.from_user.first_name}</a>\n"
                 f"🆔 ᴜsᴇʀ ɪᴅ: {user_id}\n\n"
                 f"ᴅᴇsᴄʀɪᴘᴛɪᴏɴ: {request_text}"
             )
             
-            await client.send_photo(
+            admin_msg = await client.send_photo(
                 chat_id=REQUEST_CHANNEL_ID,
                 photo=photo_file_id,
-                caption=caption
+                caption=caption,
+                reply_markup=reply_markup
             )
+            
+            # Store request data for later use
+            pending_requests[request_id] = {
+                "user_id": user_id,
+                "admin_msg_id": admin_msg.id,
+                "description": request_text,
+                "photo_id": photo_file_id,
+                "timestamp": time.time()
+            }
             
             await message.reply_text("✅ ʏᴏᴜʀ ᴠɪᴅᴇᴏ ʀᴇǫᴜᴇsᴛ ʜᴀs ʙᴇᴇɴ sᴜʙᴍɪᴛᴛᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ. ᴡᴇ'ʟʟ ᴛʀʏ ᴛᴏ ᴘʀᴏᴠɪᴅᴇ ᴛʜᴇ ᴠɪᴅᴇᴏ ᴀs sᴏᴏɴ ᴀs ᴘᴏssɪʙʟᴇ.")
         except Exception as e:
@@ -196,6 +239,43 @@ async def request_command(client: Client, message: Message):
             await message.reply_text("❌ ᴀɴ ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ ᴡʜɪʟᴇ sᴜʙᴍɪᴛᴛɪɴɢ ʏᴏᴜʀ ʀᴇǫᴜᴇsᴛ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ.")
     else:
         await message.reply_text("ᴘʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴛᴏ ᴀɴ ɪᴍᴀɢᴇ/sᴄʀᴇᴇɴsʜᴏᴛ ᴡɪᴛʜ /request ᴀɴᴅ ᴀᴅᴅ ᴀ ᴅᴇsᴄʀɪᴘᴛɪᴏɴ ᴏғ ᴛʜᴇ ᴠɪᴅᴇᴏ ʏᴏᴜ'ʀᴇ ʟᴏᴏᴋɪɴɢ ғᴏʀ.")
+
+@app.on_callback_query(filters.regex(r"^approve_"))
+async def approve_request(client: Client, callback: CallbackQuery):
+    # Check if user is admin
+    if callback.from_user.id not in ADMIN_USERS:
+        await callback.answer("ʏᴏᴜ ᴀʀᴇ ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴛᴏ ᴀᴘᴘʀᴏᴠᴇ ʀᴇǫᴜᴇsᴛs.", show_alert=True)
+        return
+    
+    # Extract request ID from callback data
+    request_id = callback.data.replace("approve_", "")
+    
+    # Check if request exists
+    if request_id not in pending_requests:
+        await callback.answer("ᴛʜɪs ʀᴇǫᴜᴇsᴛ ɴᴏ ʟᴏɴɢᴇʀ ᴇxɪsᴛs ᴏʀ ʜᴀs ᴀʟʀᴇᴀᴅʏ ʙᴇᴇɴ ᴘʀᴏᴄᴇssᴇᴅ.", show_alert=True)
+        return
+    
+    request_data = pending_requests[request_id]
+    user_id = request_data["user_id"]
+    
+    # Update the message to indicate approval
+    await callback.edit_message_caption(
+        caption=f"{callback.message.caption}\n\n✅ ᴀᴘᴘʀᴏᴠᴇᴅ ʙʏ: {callback.from_user.mention}",
+        reply_markup=None
+    )
+    
+    # Ask admin to send the terabox link
+    await callback.message.reply_text(
+        f"ᴘʟᴇᴀsᴇ sᴇɴᴅ ᴛʜᴇ ᴛᴇʀᴀʙᴏx ʟɪɴᴋ ғᴏʀ ᴛʜɪs ʀᴇǫᴜᴇsᴛ ({request_id})."
+    )
+    
+    # Set a flag to track the next message from this admin
+    client.pending_link_request = {
+        "admin_id": callback.from_user.id,
+        "request_id": request_id
+    }
+    
+    await callback.answer("ʀᴇǫᴜᴇsᴛ ᴀᴘᴘʀᴏᴠᴇᴅ. ᴘʟᴇᴀsᴇ sᴇɴᴅ ᴛʜᴇ ᴛᴇʀᴀʙᴏx ʟɪɴᴋ.")
 
 async def update_status_message(status_message, text):
     try:
@@ -211,10 +291,52 @@ async def handle_message(client: Client, message: Message):
         return
 
     user_id = message.from_user.id
+
+    # Check if this is a response to a request for a terabox link from an admin
+    if hasattr(client, 'pending_link_request') and client.pending_link_request and client.pending_link_request['admin_id'] == user_id:
+        request_id = client.pending_link_request['request_id']
+        
+        if request_id in pending_requests:
+            request_data = pending_requests[request_id]
+            url = None
+            
+            # Find terabox URL in message
+            for word in message.text.split():
+                if is_valid_url(word):
+                    url = word
+                    break
+            
+            if not url:
+                await message.reply_text("ᴘʟᴇᴀsᴇ ᴘʀᴏᴠɪᴅᴇ ᴀ ᴠᴀʟɪᴅ ᴛᴇʀᴀʙᴏx ʟɪɴᴋ.")
+                return
+            
+            # Clear the pending request
+            del client.pending_link_request
+            
+            # Process the URL for the original requester
+            await message.reply_text(f"ᴘʀᴏᴄᴇssɪɴɢ ʟɪɴᴋ ғᴏʀ ʀᴇǫᴜᴇsᴛ {request_id}...")
+            
+            # Notify user that their request has been approved
+            try:
+                await client.send_message(
+                    chat_id=request_data["user_id"],
+                    text=f"✅ ʏᴏᴜʀ ᴠɪᴅᴇᴏ ʀᴇǫᴜᴇsᴛ ʜᴀs ʙᴇᴇɴ ᴀᴘᴘʀᴏᴠᴇᴅ! ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ɴᴏᴡ..."
+                )
+            except Exception as e:
+                logger.error(f"Error notifying user {request_data['user_id']}: {e}")
+            
+            # Process the URL for download
+            await process_download(client, url, message, target_user_id=request_data["user_id"])
+            
+            # Remove from pending requests
+            del pending_requests[request_id]
+            return
+    
+    # Regular URL processing path
     is_member = await is_user_member(client, user_id)
 
     if not is_member:
-        join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/terao2")
+        join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️🚀", url="https://t.me/jetmirror")
         reply_markup = InlineKeyboardMarkup([[join_button]])
         await message.reply_text("ʏᴏᴜ ᴍᴜsᴛ ᴊᴏɪɴ ᴍʏ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ.", reply_markup=reply_markup)
         return
@@ -229,12 +351,19 @@ async def handle_message(client: Client, message: Message):
         await message.reply_text("Please provide a valid Terabox link.")
         return
 
+    await process_download(client, url, message)
+
+async def process_download(client, url, message, target_user_id=None):
+    # If target_user_id is not provided, use the message sender
+    if target_user_id is None:
+        target_user_id = message.from_user.id
+    
     encoded_url = urllib.parse.quote(url)
     # Updated API URL
     final_url = f"https://teraboxapi-phi.vercel.app/api?url={encoded_url}"
 
     download = aria2.add_uris([final_url])
-    status_message = await message.reply_text("Loading the Link Info....")
+    status_message = await message.reply_text("⏳ ᴘʀᴏᴄᴇssɪɴɢ ʏᴏᴜʀ ᴍᴇᴅɪᴀ...")
 
     start_time = datetime.now()
 
@@ -262,9 +391,9 @@ async def handle_message(client: Client, message: Message):
     file_path = download.files[0].path
     caption = (
         f"✨ {download.name}\n"
-        f"👤 ʟᴇᴇᴄʜᴇᴅ ʙʏ : <a href='tg://user?id={user_id}'>{message.from_user.first_name}</a>\n"
-        f"📥 ᴜsᴇʀ ʟɪɴᴋ: tg://user?id={user_id}\n\n"
-        "[TELUGU STUFF](https://t.me/dailydiskwala)"
+        f"👤 ʟᴇᴇᴄʜᴇᴅ ʙʏ : <a href='tg://user?id={target_user_id}'>{message.from_user.first_name}</a>\n"
+        f"📥 ᴜsᴇʀ ʟɪɴᴋ: tg://user?id={target_user_id}\n\n"
+        "[ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴊᴇᴛ-ᴍɪʀʀᴏʀ ❤️🚀](https://t.me/JetMirror)"
     )
 
     last_update_time = time.time()
@@ -375,88 +504,132 @@ async def handle_message(client: Client, message: Message):
                             progress=upload_progress
                         )
                         await app.copy_message(
-                            message.chat.id, DUMP_CHAT_ID, sent.id
+                            target_user_id, DUMP_CHAT_ID, sent.id
                         )
                     else:
                         sent = await client.send_video(
-                            DUMP_CHAT_ID, part,
+                            target_user_id, part,
                             caption=part_caption,
                             progress=upload_progress
                         )
-                        await client.send_video(
-                            message.chat.id, sent.video.file_id,
-                            caption=part_caption
-                        )
-                    os.remove(part)
+                return True
+            except Exception as e:
+                logger.error(f"Error uploading split file: {e}")
+                return False
             finally:
+                # Clean up split files
                 for part in split_files:
-                    try: os.remove(part)
-                    except: pass
+                    if os.path.exists(part) and part != file_path:
+                        os.remove(part)
         else:
-            await update_status(
-                status_message,
-                f"📤 ᴜᴘʟᴏᴀᴅɪɴɢ ᴠɪᴅᴇᴏ..."
+            try:
+                await update_status(status_message, f"📤 ᴜᴘʟᴏᴀᴅɪɴɢ: {download.name}")
+                
+                if USER_SESSION_STRING:
+                    sent = await user.send_video(
+                        DUMP_CHAT_ID, file_path,
+                        caption=caption,
+                        progress=upload_progress
+                    )
+                    await app.copy_message(
+                        target_user_id, DUMP_CHAT_ID, sent.id
+                    )
+                else:
+                    await client.send_video(
+                        target_user_id, file_path,
+                        caption=caption,
+                        progress=upload_progress
+                    )
+                return True
+            except Exception as e:
+                logger.error(f"Error uploading file: {e}")
+                return False
+
+    try:
+        upload_success = await handle_upload()
+        end_time = datetime.now()
+        time_taken = (end_time - start_time).total_seconds()
+        time_taken_str = str(datetime.timedelta(seconds=time_taken))
+        
+        if upload_success:
+            final_status = (
+                f"✅ ᴜᴘʟᴏᴀᴅᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!\n"
+                f"📁 ғɪʟᴇ: {download.name}\n"
+                f"⏱️ ᴛɪᴍᴇ ᴛᴀᴋᴇɴ: {time_taken_str}\n"
+                f"📦 sɪᴢᴇ: {format_size(os.path.getsize(file_path))}"
             )
+        else:
+            final_status = f"❌ ᴜᴘʟᴏᴀᴅ ғᴀɪʟᴇᴅ: {download.name}"
             
-            if USER_SESSION_STRING:
-                sent = await user.send_video(
-                    DUMP_CHAT_ID, file_path,
-                    caption=caption,
-                    progress=upload_progress
-                )
-                await app.copy_message(
-                    message.chat.id, DUMP_CHAT_ID, sent.id
-                )
-            else:
-                sent = await client.send_video(
-                    DUMP_CHAT_ID, file_path,
-                    caption=caption,
-                    progress=upload_progress
-                )
-                await client.send_video(
-                    message.chat.id, sent.video.file_id,
-                    caption=caption
-                )
+        await update_status_message(status_message, final_status)
+    except Exception as e:
+        logger.error(f"Error in process_download: {e}")
+        await update_status_message(status_message, f"❌ ᴇʀʀᴏʀ: {str(e)}")
+    finally:
+        # Clean up downloaded file
+        aria2.remove([download])
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    start_time = datetime.now()
-    await handle_upload()
+# Web server for uptime monitoring
+app_flask = Flask(__name__)
 
-    try:
-        await status_message.delete()
-        await message.delete()
-    except Exception as e:
-        logger.error(f"Cleanup error: {e}")
-
-flask_app = Flask(__name__)
-
-@flask_app.route('/')
+@app_flask.route('/')
 def home():
-    return render_template("index.html")
+    return "Bot is running!"
 
-def run_flask():
-    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+def run_server():
+    app_flask.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
-def keep_alive():
-    Thread(target=run_flask).start()
+async def start_user():
+    if USER_SESSION_STRING:
+        try:
+            await user.start()
+            logging.info("User client started successfully")
+        except Exception as e:
+            logging.error(f"Failed to start user client: {e}")
+            global SPLIT_SIZE
+            SPLIT_SIZE = 2093796556
 
-async def start_user_client():
-    if user:
-        await user.start()
-        logger.info("User client started.")
+# Clean pending requests older than 24 hours
+async def clean_old_requests():
+    while True:
+        current_time = time.time()
+        expired_requests = []
+        
+        for req_id, req_data in pending_requests.items():
+            if current_time - req_data['timestamp'] > 86400:  # 24 hours
+                expired_requests.append(req_id)
+        
+        for req_id in expired_requests:
+            del pending_requests[req_id]
+            
+        await asyncio.sleep(3600)  # Check every hour
 
-def run_user():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(start_user_client())
+async def main():
+    await start_user()
+    await app.start()
+    
+    # Start the request cleanup task
+    asyncio.create_task(clean_old_requests())
+    
+    # Start web server in a separate thread
+    server_thread = Thread(target=run_server)
+    server_thread.daemon = True
+    server_thread.start()
+    
+    logging.info("Bot started successfully!")
+    
+    # Keep the main task running
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    keep_alive()
-
-    if user:
-        logger.info("Starting user client...")
-        Thread(target=run_user).start()
-
-    logger.info("Starting bot client...")
-    app.run()
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(main())
+    except KeyboardInterrupt:
+        logging.info("Bot stopped by user")
+    finally:
+        loop.run_until_complete(app.stop())
+        if USER_SESSION_STRING:
+            loop.run_until_complete(user.stop())
