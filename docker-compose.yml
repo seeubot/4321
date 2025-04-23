@@ -1,13 +1,21 @@
-version: "3.3"
+version: '3'
 
 services:
-  app:
-    container_name: jet-terabox
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: bash start.sh
-    restart: on-failure
+  terabox-bot:
+    build: .
+    container_name: terabox-bot
+    restart: always
+    environment:
+      - TELEGRAM_API=${TELEGRAM_API}
+      - TELEGRAM_HASH=${TELEGRAM_HASH}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - DUMP_CHAT_ID=${DUMP_CHAT_ID}
+      - FSUB_ID=${FSUB_ID}
+      - REQUEST_CHAT_ID=${REQUEST_CHAT_ID}
+      - USER_SESSION_STRING=${USER_SESSION_STRING}
+      - PORT=8080
     ports:
-      - "80:80"
       - "8080:8080"
+    volumes:
+      - ./config.env:/app/config.env
+      - ./thumbnails:/app/thumbnails
