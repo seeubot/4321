@@ -421,10 +421,14 @@ async def handle_admin_reply(client, message):
                     )
             except Exception as e:
                 await message.reply_text(f"❌ Failed to notify user: {str(e)}")
+        # Inside handle_admin_reply function
         else:
             await message.reply_text("❌ Invalid Terabox URL. Please provide a valid Terabox link.")
-            async def process_url(client, message, url, user_id=None, status_message=None):
+
+# Outside any function, at the same level as other functions
+async def process_url(client, message, url, user_id=None, status_message=None):
     target_chat_id = user_id if user_id else message.chat.id
+    # rest of function
     
     # Check if URL is valid
     if not is_valid_url(url):
