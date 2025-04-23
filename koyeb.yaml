@@ -1,0 +1,45 @@
+name: terabox-downloader-bot
+service:
+  name: terabox-downloader
+  type: web
+  ports:
+    - port: 8080
+      protocol: http
+  routes:
+    - path: /
+      port: 8080
+  healthchecks:
+    - type: http
+      port: 8080
+      path: /
+      initial_delay: 30s
+      interval: 15s
+      timeout: 10s
+      success_threshold: 1
+      failure_threshold: 3
+  env:
+    - name: TELEGRAM_API
+      value: "YOUR_TELEGRAM_API"
+    - name: TELEGRAM_HASH
+      value: "YOUR_TELEGRAM_HASH"
+    - name: BOT_TOKEN
+      value: "YOUR_BOT_TOKEN"
+    - name: DUMP_CHAT_ID
+      value: "YOUR_DUMP_CHAT_ID"
+    - name: FSUB_ID
+      value: "YOUR_FSUB_ID"
+    - name: REQUEST_CHANNEL_ID
+      value: "YOUR_REQUEST_CHANNEL_ID"
+    - name: ADMIN_USERS
+      value: "ADMIN_USER_IDS_COMMA_SEPARATED"
+    - name: USER_SESSION_STRING
+      value: "YOUR_USER_SESSION_STRING"
+  resources:
+    instances: 1
+    cpu: 0.5
+    memory: 512Mi
+    disk:
+      name: workspace
+      size: 1Gi
+  autoscaling:
+    enabled: false
