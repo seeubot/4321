@@ -2,73 +2,295 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SEEU TERABOX</title>
     <style>
+        :root {
+            --primary-color: #4776E6;
+            --secondary-color: #8E54E9;
+            --text-color: #ffffff;
+            --accent-color: #00ffcc;
+            --bg-dark: #0f0c29;
+            --bg-medium: #302b63;
+            --bg-light: #24243e;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
         body {
-            background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
-            color: #ffffff;
+            background: linear-gradient(135deg, var(--bg-dark), var(--bg-medium), var(--bg-light));
+            color: var(--text-color);
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            height: 100vh;
+            min-height: 100vh;
             margin: 0;
             display: flex;
             justify-content: center;
             align-items: center;
-            overflow: hidden;
+            overflow-x: hidden;
+            position: relative;
         }
-
+        
+        .particles {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            pointer-events: none;
+        }
+        
+        .particle {
+            position: absolute;
+            background-color: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            animation: float-particle 15s infinite linear;
+        }
+        
         .container {
+            background: rgba(13, 12, 34, 0.6);
+            backdrop-filter: blur(8px);
+            border-radius: 20px;
+            padding: 3rem 4rem;
+            max-width: 600px;
+            width: 90%;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            position: relative;
+            z-index: 1;
+            border: 1px solid rgba(255, 255, 255, 0.1);
             text-align: center;
-            animation: fadeIn 2s ease-in-out;
+            animation: fadeIn 1.5s ease-in-out;
         }
-
+        
+        .logo {
+            font-size: 4em;
+            margin-bottom: 0.5rem;
+            animation: pulse 2s infinite ease-in-out;
+        }
+        
         h1 {
-            font-size: 3em;
-            margin-bottom: 0.2em;
-            background: linear-gradient(90deg, #00d2ff, #3a7bd5);
+            font-size: 2.5em;
+            margin-bottom: 1rem;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            animation: float 3s ease-in-out infinite;
+            font-weight: 700;
+            letter-spacing: 1px;
         }
-
-        p {
-            font-size: 1.2em;
-            opacity: 0.8;
-            animation: fadeIn 3s ease-in-out;
+        
+        .tagline {
+            font-size: 1.3em;
+            margin-bottom: 2rem;
+            opacity: 0.9;
+            font-weight: 300;
         }
-
-        .pulse {
-            margin-top: 20px;
-            width: 20px;
-            height: 20px;
-            background-color: #00ffcc;
+        
+        .status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 2rem 0;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 50px;
+            padding: 1rem 2rem;
+        }
+        
+        .status-pulse {
+            width: 15px;
+            height: 15px;
+            background-color: var(--accent-color);
             border-radius: 50%;
             animation: pulse 2s infinite;
-            margin-left: auto;
-            margin-right: auto;
+            margin-right: 15px;
+            box-shadow: 0 0 10px var(--accent-color);
         }
-
+        
+        .status-text {
+            font-size: 1.1em;
+            font-weight: 500;
+        }
+        
+        .footer {
+            margin-top: 2rem;
+            font-size: 0.9em;
+            opacity: 0.7;
+        }
+        
+        .telegram-btn {
+            display: inline-block;
+            margin-top: 2rem;
+            padding: 0.8rem 2rem;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            text-decoration: none;
+            border-radius: 50px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        .telegram-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+        }
+        
+        .telegram-btn:active {
+            transform: translateY(1px);
+        }
+        
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
+            from { opacity: 0; transform: translateY(30px); }
             to { opacity: 1; transform: translateY(0); }
         }
-
-        @keyframes float {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-10px); }
-        }
-
+        
         @keyframes pulse {
             0% { transform: scale(0.95); opacity: 0.7; }
-            70% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 1; box-shadow: 0 0 15px var(--accent-color); }
             100% { transform: scale(0.95); opacity: 0.7; }
+        }
+        
+        @keyframes float-particle {
+            0% {
+                transform: translateY(0) translateX(0);
+                opacity: 0;
+            }
+            50% {
+                opacity: 0.5;
+            }
+            100% {
+                transform: translateY(-100vh) translateX(100px);
+                opacity: 0;
+            }
+        }
+        
+        .server-info {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+        
+        .info-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 0.8rem 1.5rem;
+            flex: 1;
+            min-width: 150px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .info-title {
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-bottom: 0.3rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .info-value {
+            font-size: 1.2em;
+            font-weight: 600;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 2rem;
+                width: 95%;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+            
+            .tagline {
+                font-size: 1.1em;
+            }
+            
+            .logo {
+                font-size: 3em;
+            }
+            
+            .info-card {
+                min-width: 120px;
+            }
         }
     </style>
 </head>
 <body>
+    <div id="particles" class="particles"></div>
+    
     <div class="container">
-        <h1>🚀 <a href="https://t.me/JetMirror">SEEU</a> is Live!</h1>
-        <p>server running</p>
-        <div class="pulse"></div>
+        <div class="logo">🚀</div>
+        <h1>SEEU TERABOX</h1>
+        <p class="tagline">Your premium Terabox download service</p>
+        
+        <div class="status">
+            <div class="status-pulse"></div>
+            <div class="status-text">Server Online & Operational</div>
+        </div>
+        
+        <div class="server-info">
+            <div class="info-card">
+                <div class="info-title">Uptime</div>
+                <div class="info-value">99.8%</div>
+            </div>
+            <div class="info-card">
+                <div class="info-title">Speed</div>
+                <div class="info-value">Ultrafast</div>
+            </div>
+            <div class="info-card">
+                <div class="info-title">Status</div>
+                <div class="info-value">Active</div>
+            </div>
+        </div>
+        
+        <a href="https://t.me/dailydiskwala" class="telegram-btn">JOIN ON TELEGRAM</a>
+        
+        <div class="footer">
+            © 2025 SEEU TERABOX | High-Speed Downloads
+        </div>
     </div>
+
+    <script>
+        // Create floating particles
+        function createParticles() {
+            const particlesContainer = document.getElementById('particles');
+            const particleCount = 20;
+            
+            for (let i = 0; i < particleCount; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'particle';
+                
+                // Random size
+                const size = Math.random() * 5 + 2;
+                particle.style.width = `${size}px`;
+                particle.style.height = `${size}px`;
+                
+                // Random position
+                const posX = Math.random() * 100;
+                const posY = Math.random() * 100;
+                particle.style.left = `${posX}%`;
+                particle.style.top = `${posY}%`;
+                
+                // Random animation delay
+                const delay = Math.random() * 15;
+                particle.style.animationDelay = `${delay}s`;
+                
+                // Random animation duration
+                const duration = Math.random() * 10 + 10;
+                particle.style.animationDuration = `${duration}s`;
+                
+                particlesContainer.appendChild(particle);
+            }
+        }
+        
+        // Initialize particles
+        window.addEventListener('load', createParticles);
+    </script>
 </body>
 </html>
