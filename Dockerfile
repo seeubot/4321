@@ -11,7 +11,12 @@ WORKDIR /app
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# For PyroFork specific installation (if needed)
+# If regular Pyrogram works with the code, this can be removed
+RUN pip install --no-cache-dir git+https://github.com/pyrofork/pyrogram.git@v2.x
 
 # Copy the bot code
 COPY . .
@@ -25,5 +30,9 @@ EXPOSE 8080
 # Set environment variables
 ENV PORT=8080
 
+# Start script permissions
+COPY start.sh /app/
+RUN chmod +x /app/start.sh
+
 # Command to run the bot
-CMD ["python", "terabox.py"]
+CMD ["/app/start.sh"]
