@@ -11,6 +11,7 @@ from pyrogram.enums import ChatMemberStatus
 from pyrogram.errors import FloodWait
 import time
 import urllib.parse
+import re
 from urllib.parse import urlparse
 from flask import Flask, render_template
 from threading import Thread
@@ -18,6 +19,7 @@ import requests
 import json
 import random
 import string
+import magic  # Make sure to install python-magic
 
 load_dotenv('config.env', override=True)
 logging.basicConfig(
@@ -167,27 +169,27 @@ async def get_direct_link(terabox_url):
     api_url = f"https://teraboxapi-phi.vercel.app/api?url={encoded_url}"
     
     try:
-        async with requests.Session() as session:  # Use session for connection pooling
-            response = await asyncio.to_thread(session.get, api_url, timeout=30)
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            if data.get("status") != "success":
-                return None, "API returned error status"
-            
-            extracted_info = data.get("Extracted Info", [])
-            if not extracted_info or not isinstance(extracted_info, list) or len(extracted_info) == 0:
-                return None, "No valid extracted info found in API response"
-            
-            direct_link = extracted_info[0].get("Direct Download Link")
-            if not direct_link:
-                return None, "No direct download link found in API response"
-            
-            file_name = extracted_info[0].get("Title", "terabox_file")
-            file_size = extracted_info[0].get("Size", "Unknown")
-            
-            return direct_link, {"title": file_name, "size": file_size}
+        # Use asyncio.to_thread for non-blocking HTTP request
+        response = await asyncio.to_thread(lambda: requests.get(api_url, timeout=30))
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        if data.get("status") != "success":
+            return None, "API returned error status"
+        
+        extracted_info = data.get("Extracted Info", [])
+        if not extracted_info or not isinstance(extracted_info, list) or len(extracted_info) == 0:
+            return None, "No valid extracted info found in API response"
+        
+        direct_link = extracted_info[0].get("Direct Download Link")
+        if not direct_link:
+            return None, "No direct download link found in API response"
+        
+        file_name = extracted_info[0].get("Title", "terabox_file")
+        file_size = extracted_info[0].get("Size", "Unknown")
+        
+        return direct_link, {"title": file_name, "size": file_size}
     
     except requests.exceptions.RequestException as e:
         return None, f"Error fetching API: {str(e)}"
@@ -551,6 +553,35 @@ async def handle_message(client: Client, message: Message):
         )
         await update_status_message(status_message, status_text)
 
+    # Fix the indentation error in run_ffmpeg
+    async def run_ffmpeg(cmd, output_path, part_num, total_parts, status_message, start_time):
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            await proc.communicate()
+            
+            if proc.returncode != 0:
+                logger.error(f"FFmpeg process failed with return code {proc.returncode}")
+                return False
+            
+            elapsed_time = datetime.now() - start_time
+            elapsed_minutes, elapsed_seconds = divmod(elapsed_time.seconds, 60)
+            
+            status_text = (
+                f"📝 Splitting file...\n"
+                f"Part {part_num}/{total_parts} processed in {elapsed_minutes}m {elapsed_seconds}s"
+            )
+            
+            await update_status_message(status_message, status_text)
+            return os.path.exists(output_path)
+        except Exception as e:
+            logger.error(f"FFmpeg execution error: {e}")
+            return False
+
     # Optimized video splitting function
     async def split_video_with_ffmpeg(input_path, output_prefix, split_size):
         try:
@@ -566,339 +597,303 @@ async def handle_message(client: Client, message: Message):
                 stderr=asyncio.subprocess.PIPE
             )
             stdout, _ = await proc.communicate()
-            total_duration = float(stdout.decode().strip())
+            duration = float(stdout.decode('utf-8').strip())
             
+            # Calculate number of segments needed
             file_size = os.path.getsize(input_path)
-            parts = math.ceil(file_size / split_size)
+            total_segments = math.ceil(file_size / split_size)
+            segment_duration = duration / total_segments
             
-            if parts == 1:
-                return [input_path]
+            parts = []
             
-            duration_per_part = total_duration / parts
-            split_files = []
-            split_tasks = []
-            
-            # Create tasks for parallel processing
-            for i in range(parts):
-                output_path = f"{output_prefix}.{i+1:03d}{original_ext}"
+            for i in range(total_segments):
+                start_time_sec = i * segment_duration
+                output_path = f"{output_prefix}_part{i+1}{original_ext}"
                 
-                # Create ffmpeg command
                 cmd = [
-                    'xtra', '-y', '-ss', str(i * duration_per_part),
-                    '-i', input_path, '-t', str(duration_per_part),
-                    '-c', 'copy', '-map', '0',
-                    '-avoid_negative_ts', 'make_zero',
-                    output_path
+                    'ffmpeg', '-y', '-i', input_path, '-ss', str(start_time_sec),
+                    '-t', str(segment_duration), '-c', 'copy', output_path
                 ]
                 
-                # Schedule the task
-                task = asyncio.create_task(run_ffmpeg(
-                    cmd, output_path, i+1, parts, status_message, start_time
-                ))
-                split_tasks.append(task)
-                split_files.append(output_path)
+                success = await run_ffmpeg(cmd, output_path, i+1, total_segments, status_message, start_time)
+                if success:
+                    parts.append(output_path)
+                else:
+                    logger.error(f"Failed to create part {i+1}")
             
-            # Wait for all splits to complete
-            await asyncio.gather(*split_tasks)
-            return split_files
+            return parts
         except Exception as e:
-            logger.error(f"Split error: {e}")
-            raise
+            logger.error(f"Error splitting video: {e}")
+            return []
 
-    # Helper function for ffmpeg execution
-    async def run_ffmpeg(cmd, output_path, part_num, total_parts, status_message, start_time):
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
-        await proc.communicate()
-        
-        if proc.returncode != 0:
-            logger.error(f"FFmpeg process failed with return code {proc.returncode}")
-            return False
-        
-        elapsed_time = datetime.now() - start_time
-        elapsed_minutes, elapsed_seconds = divmod(elapsed_time.seconds, 60)
-        
-        status_text = (
-            f"📝 Splitting file...\n"
-            f"Part {part_num}/{total_parts} processed in {elapsed_minutes}m {elapsed_seconds}s"
-        )
-        
-        await update_status_message(status_message, status_text)
-        return os.path.exists(output_path)
-    except Exception as e:
-        logger.error(f"FFmpeg execution error: {e}")
-        return False
-
-# Continue with the handle_message function to upload files
+    # Determine file type for proper handling
     file_size = os.path.getsize(file_path)
-    thumbnail_path = user_thumbnails.get(user_id) if user_id in user_thumbnails else None
+    mime = magic.Magic(mime=True)
+    file_type = mime.from_file(file_path)
     
-    # Choose whether to use user client or bot client for upload
-    upload_client = user if user and file_size > SPLIT_SIZE else client
-    
-    try:
-        # Check if file needs splitting
-        if file_size > SPLIT_SIZE:
-            await status_message.edit_text("File size exceeds limit. Splitting file...")
+    # Check if file exceeds Telegram's size limits
+    if file_size > SPLIT_SIZE:
+        await status_message.edit_text(f"File size ({format_size(file_size)}) exceeds Telegram limits. Splitting file...")
+        
+        # Different handling based on file type
+        if file_type.startswith('video/'):
+            # Use video splitter for videos
+            split_parts = await split_video_with_ffmpeg(file_path, file_path, SPLIT_SIZE)
             
-            # Determine if the file is a video
-            is_video = False
-            try:
-                mime_type = await asyncio.to_thread(lambda: magic.Magic(mime=True).from_file(file_path))
-                is_video = mime_type.startswith('video/')
-            except:
-                # If magic fails, try to guess based on extension
-                ext = os.path.splitext(file_path)[1].lower()
-                is_video = ext in ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm']
-            
-            if is_video:
-                # Split video file
-                output_prefix = os.path.splitext(file_path)[0]
-                split_files = await split_video_with_ffmpeg(file_path, output_prefix, SPLIT_SIZE)
+            if not split_parts:
+                await status_message.edit_text("Failed to split video. Please try another file.")
+                return
                 
-                # Upload each part
-                for i, part_file in enumerate(split_files):
-                    part_caption = f"{caption}\n\nPart {i+1}/{len(split_files)}"
+            # Upload each part
+            for i, part_path in enumerate(split_parts):
+                part_caption = f"{caption}\n\nPart {i+1}/{len(split_parts)}"
+                
+                # Check for user thumbnail
+                thumb_path = None
+                if user_id in user_thumbnails:
+                    thumb_path = user_thumbnails[user_id]
+                
+                try:
+                    # Send as video with progress tracking
+                    await client.send_video(
+                        chat_id=message.chat.id,
+                        video=part_path,
+                        caption=part_caption,
+                        progress=upload_progress,
+                        thumb=thumb_path,
+                        supports_streaming=True
+                    )
                     
-                    if os.path.exists(part_file):
-                        if user:  # User client available for premium uploads
-                            await user.send_video(
-                                chat_id=message.chat.id,
-                                video=part_file,
-                                caption=part_caption,
-                                thumb=thumbnail_path,
-                                progress=upload_progress
-                            )
-                        else:  # Bot client
-                            await client.send_video(
-                                chat_id=message.chat.id,
-                                video=part_file,
-                                caption=part_caption,
-                                thumb=thumbnail_path,
-                                progress=upload_progress
-                            )
-                        
-                        # Clean up part file after upload
+                    # Also forward to dump channel if configured
+                    if DUMP_CHAT_ID:
                         try:
-                            os.remove(part_file)
-                        except:
-                            pass
-            else:
-                # For non-video files, use RAR splitting
-                await status_message.edit_text("Splitting non-video file using RAR...")
+                            await client.send_video(
+                                chat_id=DUMP_CHAT_ID,
+                                video=part_path,
+                                caption=part_caption,
+                                thumb=thumb_path,
+                                supports_streaming=True
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to forward to dump channel: {e}")
+                except FloodWait as e:
+                    logger.warning(f"FloodWait: Sleeping for {e.value}s")
+                    await asyncio.sleep(e.value)
+                    # Retry after waiting
+                    await client.send_video(
+                        chat_id=message.chat.id,
+                        video=part_path,
+                        caption=part_caption,
+                        progress=upload_progress,
+                        thumb=thumb_path,
+                        supports_streaming=True
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send video part {i+1}: {e}")
+                    await message.reply_text(f"Failed to send part {i+1}: {str(e)}")
                 
-                split_dir = f"split_{int(time.time())}"
-                os.makedirs(split_dir, exist_ok=True)
-                
-                # Create RAR command
-                rar_cmd = [
-                    'rar', 'a', '-v2g', '-m0',
-                    os.path.join(split_dir, f"{os.path.basename(file_path)}.rar"),
-                    file_path
-                ]
-                
-                proc = await asyncio.create_subprocess_exec(
-                    *rar_cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                # Clean up part file after sending
+                try:
+                    os.remove(part_path)
+                except Exception as e:
+                    logger.error(f"Failed to remove part file {part_path}: {e}")
+        else:
+            # Generic file splitting (for non-video files)
+            await status_message.edit_text("Non-video files will be split into parts soon. Feature under development.")
+            # TODO: Implement file splitting for non-video files
+    else:
+        # File is under size limit, upload directly
+        try:
+            # Check for user thumbnail
+            thumb_path = None
+            if user_id in user_thumbnails:
+                thumb_path = user_thumbnails[user_id]
+            
+            # Different handling based on file type
+            if file_type.startswith('video/'):
+                # Send as video
+                await client.send_video(
+                    chat_id=message.chat.id,
+                    video=file_path,
+                    caption=caption,
+                    progress=upload_progress,
+                    thumb=thumb_path,
+                    supports_streaming=True
                 )
                 
-                await proc.communicate()
-                
-                # Upload each RAR part
-                rar_files = [os.path.join(split_dir, f) for f in os.listdir(split_dir) if f.endswith('.rar')]
-                rar_files.sort()
-                
-                for i, part_file in enumerate(rar_files):
-                    part_caption = f"{caption}\n\nPart {i+1}/{len(rar_files)}"
-                    
-                    await client.send_document(
-                        chat_id=message.chat.id,
-                        document=part_file,
-                        caption=part_caption,
-                        thumb=thumbnail_path,
-                        progress=upload_progress
-                    )
-                    
-                    # Clean up part file after upload
-                    try:
-                        os.remove(part_file)
-                    except:
-                        pass
-                    
-                # Clean up split directory
-                try:
-                    os.rmdir(split_dir)
-                except:
-                    pass
-        else:
-            # No splitting needed, upload directly
-            if os.path.exists(file_path):
-                mime_type = await asyncio.to_thread(lambda: magic.Magic(mime=True).from_file(file_path))
-                
-                if mime_type.startswith('video/'):
-                    await upload_client.send_video(
-                        chat_id=message.chat.id,
-                        video=file_path,
-                        caption=caption,
-                        thumb=thumbnail_path,
-                        progress=upload_progress
-                    )
-                else:
-                    await upload_client.send_document(
-                        chat_id=message.chat.id,
-                        document=file_path,
-                        caption=caption,
-                        thumb=thumbnail_path,
-                        progress=upload_progress
-                    )
-                
-                # Forward copy to dump channel if configured
+                # Also forward to dump channel if configured
                 if DUMP_CHAT_ID:
                     try:
-                        if mime_type.startswith('video/'):
-                            await upload_client.send_video(
-                                chat_id=DUMP_CHAT_ID,
-                                video=file_path,
-                                caption=f"⚡️ Forwarded from {message.from_user.mention}\n\n{caption}"
-                            )
-                        else:
-                            await upload_client.send_document(
-                                chat_id=DUMP_CHAT_ID,
-                                document=file_path,
-                                caption=f"⚡️ Forwarded from {message.from_user.mention}\n\n{caption}"
-                            )
+                        await client.send_video(
+                            chat_id=DUMP_CHAT_ID,
+                            video=file_path,
+                            caption=caption,
+                            thumb=thumb_path,
+                            supports_streaming=True
+                        )
                     except Exception as e:
                         logger.error(f"Failed to forward to dump channel: {e}")
-    except Exception as e:
-        logger.error(f"Upload error: {e}")
-        await status_message.edit_text(f"❌ Upload failed: {str(e)}")
-        return
+            elif file_type.startswith('audio/'):
+                # Send as audio
+                await client.send_audio(
+                    chat_id=message.chat.id,
+                    audio=file_path,
+                    caption=caption,
+                    progress=upload_progress
+                )
+                
+                # Also forward to dump channel if configured
+                if DUMP_CHAT_ID:
+                    try:
+                        await client.send_audio(
+                            chat_id=DUMP_CHAT_ID,
+                            audio=file_path,
+                            caption=caption
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to forward to dump channel: {e}")
+            elif file_type.startswith('image/'):
+                # Send as photo
+                await client.send_photo(
+                    chat_id=message.chat.id,
+                    photo=file_path,
+                    caption=caption,
+                    progress=upload_progress
+                )
+                
+                # Also forward to dump channel if configured
+                if DUMP_CHAT_ID:
+                    try:
+                        await client.send_photo(
+                            chat_id=DUMP_CHAT_ID,
+                            photo=file_path,
+                            caption=caption
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to forward to dump channel: {e}")
+            else:
+                # Send as document
+                await client.send_document(
+                    chat_id=message.chat.id,
+                    document=file_path,
+                    caption=caption,
+                    progress=upload_progress,
+                    thumb=thumb_path
+                )
+                
+                # Also forward to dump channel if configured
+                if DUMP_CHAT_ID:
+                    try:
+                        await client.send_document(
+                            chat_id=DUMP_CHAT_ID,
+                            document=file_path,
+                            caption=caption,
+                            thumb=thumb_path
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to forward to dump channel: {e}")
+        except FloodWait as e:
+            logger.warning(f"FloodWait: Sleeping for {e.value}s")
+            await asyncio.sleep(e.value)
+            # Retry after waiting
+            await client.send_document(
+                chat_id=message.chat.id,
+                document=file_path,
+                caption=caption,
+                progress=upload_progress,
+                thumb=thumb_path if 'thumb_path' in locals() else None
+            )
+        except Exception as e:
+            logger.error(f"Failed to send file: {e}")
+            await status_message.edit_text(f"Failed to send file: {str(e)}")
     
-    # Clean up original file
+    # Clean up
     try:
         os.remove(file_path)
-    except:
-        pass
-    
-    await status_message.edit_text("✅ Upload completed successfully!")
-
-# Handle replies from request chat to users
-@app.on_message(filters.chat(REQUEST_CHAT_ID) & filters.reply)
-async def handle_admin_reply(client: Client, message: Message):
-    if not message.reply_to_message:
-        return
-    
-    # Extract user ID from the original request
-    try:
-        reply_text = message.reply_to_message.text or message.reply_to_message.caption or ""
-        user_id_match = re.search(r"ID: `(\d+)`", reply_text)
-        
-        if not user_id_match:
-            return
-        
-        user_id = int(user_id_match.group(1))
-        
-        # Format the admin reply
-        admin_reply = (
-            f"📢 **Reply from Admin**\n\n"
-            f"{message.text if message.text else 'Media message'}"
-        )
-        
-        # Forward the admin's reply to the user
-        if message.media:
-            if message.photo:
-                await client.send_photo(
-                    chat_id=user_id,
-                    photo=message.photo.file_id,
-                    caption=admin_reply
-                )
-            elif message.video:
-                await client.send_video(
-                    chat_id=user_id,
-                    video=message.video.file_id,
-                    caption=admin_reply
-                )
-            elif message.document:
-                await client.send_document(
-                    chat_id=user_id,
-                    document=message.document.file_id,
-                    caption=admin_reply
-                )
-            elif message.animation:
-                await client.send_animation(
-                    chat_id=user_id,
-                    animation=message.animation.file_id,
-                    caption=admin_reply
-                )
-            else:
-                await client.send_message(
-                    chat_id=user_id,
-                    text=admin_reply
-                )
-        else:
-            await client.send_message(
-                chat_id=user_id,
-                text=admin_reply
-            )
-        
-        await message.reply_text(f"✅ Reply sent to user with ID: `{user_id}`")
     except Exception as e:
-        logger.error(f"Failed to forward admin reply: {e}")
-        await message.reply_text(f"❌ Failed to send reply: {str(e)}")
+        logger.error(f"Failed to remove file {file_path}: {e}")
+    
+    await status_message.edit_text("✅ File uploaded successfully!")
 
-# Web server to keep the bot alive
-app_flask = Flask(__name__)
+# Web server for keeping the bot alive on hosting platforms
+app_web = Flask(__name__)
 
-@app_flask.route('/')
-def index():
-    return "Bot is running!"
+@app_web.route('/')
+def home():
+    return render_template('index.html')
 
-def run_server():
-    app_flask.run(host='0.0.0.0', port=8080)
+def run_web_server():
+    app_web.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
-# Main function
-async def main():
-    server_thread = Thread(target=run_server)
+# Main entry point
+if __name__ == "__main__":
+    # Set up web server thread
+    server_thread = Thread(target=run_web_server)
     server_thread.daemon = True
     server_thread.start()
     
-    try:
-        # Start aria2
-        logger.info("Starting aria2 daemon...")
-        aria2_proc = await asyncio.create_subprocess_exec(
-            'aria2c', '--enable-rpc', '--rpc-listen-all=true',
-            '--rpc-listen-port=6800', '--max-concurrent-downloads=10',
-            '--continue=true', '--max-connection-per-server=16',
-            '--min-split-size=4M', '--split=16', '--disk-cache=64M',
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL
-        )
-        
-        # Start clients
-        logger.info("Starting Telegram clients...")
-        await app.start()
-        if user:
-            await user.start()
-        
-        logger.info("Bot started successfully!")
-        await idle()
-    finally:
-        # Stop clients on exit
-        await app.stop()
-        if user:
-            await user.stop()
-        
-        # Kill aria2 daemon
-        if 'aria2_proc' in locals():
-            aria2_proc.terminate()
-            await aria2_proc.wait()
-
-if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    # Ensure templates directory exists
+    os.makedirs('templates', exist_ok=True)
+    
+    # Create basic index.html template
+    with open('templates/index.html', 'w') as f:
+        f.write("""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Terabox Downloader Bot</title>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    margin: 0;
+                    padding: 0;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    height: 100vh;
+                    background-color: #f5f5f5;
+                }
+                .container {
+                    text-align: center;
+                    padding: 20px;
+                    border-radius: 10px;
+                    background-color: white;
+                    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+                }
+                h1 {
+                    color: #4CAF50;
+                }
+                p {
+                    margin-bottom: 20px;
+                }
+                .btn {
+                    display: inline-block;
+                    background-color: #4CAF50;
+                    color: white;
+                    padding: 10px 20px;
+                    text-decoration: none;
+                    border-radius: 5px;
+                    transition: background-color 0.3s;
+                }
+                .btn:hover {
+                    background-color: #45a049;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>Terabox Downloader Bot</h1>
+                <p>This bot is running successfully!</p>
+                <a href="https://t.me/terao2" class="btn">Open Telegram Channel</a>
+            </div>
+        </body>
+        </html>
+        """)
+    
+    # Start bot
+    logger.info("Starting bot...")
+    if user:
+        user.start()
+        logger.info("User client started")
+    
+    app.run()
